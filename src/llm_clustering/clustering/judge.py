@@ -37,6 +37,8 @@ class AssignmentResult:
     confidence_text: str
     llm_rationale: str
     raw_response: dict[str, Any]
+    latency_ms: float
+    token_estimate: int
     suggested_cluster: ClusterRecord | None = None
 
 
@@ -70,6 +72,7 @@ class AssignmentJudge:
         for record in dataframe.to_dict(orient="records"):
             prompt = self._build_prompt(batch_slice.batch_id, cluster_payload, record)
             response_text, latency = self._execute_prompt(prompt)
+            latency_ms = latency * 1000
 
             try:
                 response_payload = json.loads(response_text)
@@ -87,6 +90,8 @@ class AssignmentJudge:
                         confidence_text="low (invalid JSON)",
                         llm_rationale="Ответ модели нельзя разобрать.",
                         raw_response={},
+                        latency_ms=round(latency_ms, 2),
+                        token_estimate=0,
                     )
                 )
                 continue
@@ -96,6 +101,8 @@ class AssignmentJudge:
                 request_record=record,
                 response=response_payload,
                 cluster_context=candidate_clusters,
+                latency_ms=latency_ms,
+                token_estimate=self._estimate_tokens(prompt, response_text),
             )
             results.append(result)
 
@@ -104,7 +111,7 @@ class AssignmentJudge:
                 request_id=result.request_id,
                 prompt=prompt,
                 response=response_payload,
-                latency_ms=latency * 1000,
+                latency_ms=latency_ms,
             )
 
         return results
@@ -141,6 +148,8 @@ class AssignmentJudge:
         request_record: dict[str, Any],
         response: dict[str, Any],
         cluster_context: Sequence[ClusterRecord],
+        latency_ms: float,
+        token_estimate: int,
     ) -> AssignmentResult:
         decision = str(response.get("decision") or "skip").strip().lower()
         if decision not in {"assign", "new_cluster", "skip"}:
@@ -183,6 +192,8 @@ class AssignmentJudge:
             confidence_text=confidence_text,
             llm_rationale=rationale,
             raw_response=response,
+             latency_ms=round(latency_ms, 2),
+             token_estimate=token_estimate,
             suggested_cluster=suggested_cluster,
         )
 
@@ -258,7 +269,15 @@ class AssignmentJudge:
             response=response,
             latency_ms=round(latency_ms, 2),
             cost_estimate=None,
-            metadata={"request_id": request_id},
+            metadata={
+                "request_id": request_id,
+                "token_estimate": self._estimate_tokens(prompt, json.dumps(response, ensure_ascii=False)),
+            },
         )
         self.prompt_logger.log(entry)
+
+    @staticmethod
+    def _estimate_tokens(prompt: RenderedPrompt, response_text: str) -> int:
+        total_chars = len(prompt.system) + len(prompt.user) + len(response_text)
+        return max(1, total_chars // 4)
 

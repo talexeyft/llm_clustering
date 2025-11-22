@@ -36,11 +36,11 @@ class LLMConfig(BaseModel):
     """LLM provider and model defaults."""
 
     provider: str = Field(
-        "openrouter",
+        "ollama",
         description="Provider name used by llm.factory (openrouter, ollama, triton, etc.).",
     )
     model: str = Field(
-        "qwen/qwen-3-next",
+        "qwen3:30b",
         description="Default model identifier for the selected provider.",
     )
     temperature: float = Field(
@@ -95,8 +95,8 @@ class Settings(BaseSettings):
     openrouter_api_key: str = ""
 
     # LLM Configuration
-    default_llm_provider: str = "openrouter"
-    default_model: str = "qwen/qwen-3-next"
+    default_llm_provider: str = "ollama"
+    default_model: str = "qwen3:30b"
 
     # OpenRouter specific
     openrouter_model: str = "qwen/qwen-3-next"
@@ -124,6 +124,7 @@ class Settings(BaseSettings):
     # Storage
     batches_dir: Path = Path("ai_data") / "batches"
     results_dir: Path = Path("ai_data") / "results"
+    reports_dir: Path = Path("ai_data") / "reports"
 
     # Logging
     log_level: str = "INFO"

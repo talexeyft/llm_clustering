@@ -71,6 +71,11 @@ def main() -> None:
     print(f"[LLM Clustering] Batch {result.batch_id} processed.")
     print(f"Requests: {total_requests}, assigned: {assigned} ({coverage:.1f}% coverage)")
     print(f"Assignments stored at: {result.assignments_path}")
+    if result.cohesion_report:
+        print(f"Cohesion check saved to: {result.cohesion_report}")
+    else:
+        print("Cohesion check skipped (not enough assignments).")
+    print(f"Metrics appended to: {result.metrics_path}")
     print(f"Prepared snapshot: {result.prepared_snapshot.csv}")
 
 

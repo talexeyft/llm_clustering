@@ -12,11 +12,11 @@ pip install -r requirements.txt
 
 ```bash
 cp env.example .env
-# Заполните OPENROUTER_API_KEY в .env (для OpenRouter)
+# Убедитесь, что Ollama установлена и доступна локально
 ```
 
-По умолчанию проект настроен на использование Qwen 3 Next через OpenRouter.
-Модель: `qwen/qwen-3-next`
+По умолчанию проект настроен на использование локальной Ollama с моделью `qwen3:30b`.
+Перед запуском выполните `ollama serve` и `ollama pull qwen3:30b`.
 
 ### Обязательные переменные окружения
 
@@ -41,11 +41,21 @@ cp env.example .env
 
 Сырые/очищенные выгрузки складываются в `ai_data/batches/`, результаты присвоений — в `ai_data/results/`.
 
+### Тестовый датасет из ~/data/subs
+
+```bash
+# Собрать первые 1000 сообщений в parquet/csv
+PYTHONPATH=src:$PYTHONPATH python -m llm_clustering.data.subs_dataset --limit 1000
+```
+
+После выполнения появятся файлы `ai_data/subs_sample_1000.parquet` и `.csv`.
+Их можно использовать в качестве стандартного входа для пайплайна.
+
 ## Запуск MVP пайплайна
 
 ```bash
-# пример: CSV с колонками request_id,text,text_raw,text_clean
-INPUT=ai_data/sample_requests.csv make run
+# пример: parquet c тестовыми обращениями subs
+INPUT=ai_data/subs_sample_1000.parquet make run
 
 # указать batch_id и альтернативное имя текстового столбца
 INPUT=ai_data/support.csv BATCH=batch-20241121 TEXT_COL=message make run
@@ -56,22 +66,21 @@ INPUT=ai_data/support.csv BATCH=batch-20241121 TEXT_COL=message make run
 - готовые батчи и снапшоты лежат в `ai_data/batches/`
 - результаты решений Assignment Judge — `ai_data/results/<batch_id>.parquet` и `.csv`
 - логи промптов/ответов — `ai_data/prompts/`
+- отчеты QA (cohesion) — `ai_data/reports/`
 
 ### Использование локальной Ollama
 
-Для использования локальной Ollama с Qwen3 30B:
+Локальная Ollama является дефолтным провайдером.
 
-1. Убедитесь, что Ollama установлен и запущен:
+1. Проверьте, что сервис запущен:
    ```bash
    ollama serve
    ```
-
-2. Загрузите модель:
+2. Убедитесь, что модель скачана:
    ```bash
    ollama pull qwen3:30b
    ```
-
-3. В `.env` установите:
+3. В `.env` уже выставлены:
    ```
    DEFAULT_LLM_PROVIDER=ollama
    OLLAMA_MODEL=qwen3:30b

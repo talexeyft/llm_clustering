@@ -33,6 +33,8 @@ class ProposerResult:
     clusters: list[ClusterRecord]
     skipped_request_ids: list[str]
     raw_response: dict[str, Any]
+    latency_ms: float
+    token_estimate: int
 
     @property
     def num_clusters(self) -> int:
@@ -62,6 +64,8 @@ class ClusterProposer:
         """Generate and persist clusters for a batch slice."""
         prompt = self._build_prompt(batch_slice, known_clusters_limit)
         response_text, latency = self._execute_prompt(prompt)
+        latency_ms = latency * 1000
+        token_estimate = self._estimate_tokens(prompt, response_text)
         response_payload = self._parse_response(response_text, batch_slice.batch_id)
 
         clusters = self._persist_clusters(
@@ -77,7 +81,8 @@ class ClusterProposer:
             batch_slice=batch_slice,
             prompt=prompt,
             response=response_payload,
-            latency_ms=latency * 1000,
+            latency_ms=latency_ms,
+            token_estimate=token_estimate,
         )
 
         return ProposerResult(
@@ -86,6 +91,8 @@ class ClusterProposer:
             clusters=clusters,
             skipped_request_ids=[str(item) for item in skipped_ids],
             raw_response=response_payload,
+            latency_ms=round(latency_ms, 2),
+            token_estimate=token_estimate,
         )
 
     def _build_prompt(
@@ -233,6 +240,7 @@ class ClusterProposer:
         prompt: RenderedPrompt,
         response: dict[str, Any],
         latency_ms: float,
+        token_estimate: int,
     ) -> None:
         entry = PromptLogEntry(
             prompt_name="cluster_proposer_v0",
@@ -245,7 +253,13 @@ class ClusterProposer:
             metadata={
                 "num_requests": len(batch_slice.dataframe.index),
                 "max_clusters": self.batch_config.max_clusters_per_batch,
+                "token_estimate": token_estimate,
             },
         )
         self.prompt_logger.log(entry)
+
+    @staticmethod
+    def _estimate_tokens(prompt: RenderedPrompt, response_text: str) -> int:
+        total_chars = len(prompt.system) + len(prompt.user) + len(response_text)
+        return max(1, total_chars // 4)
 

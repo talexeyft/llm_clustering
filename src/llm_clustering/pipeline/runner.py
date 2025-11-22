@@ -12,12 +12,14 @@ from llm_clustering.clustering.judge import AssignmentJudge, AssignmentResult
 from llm_clustering.clustering.proposer import ClusterProposer, ProposerResult
 from llm_clustering.clustering.registry import ClusterRecord, ClusterRegistry
 from llm_clustering.config import Settings, get_settings
+from llm_clustering.monitoring import CohesionChecker
 from llm_clustering.pipeline.batch_builder import (
     BatchBuilder,
     BatchBuildResult,
     BatchSlice,
     SnapshotPaths,
 )
+from llm_clustering.utils.metrics import MetricsTracker
 
 
 @dataclass(slots=True)
@@ -42,10 +44,13 @@ class PipelineResult:
     """Full outcome of a pipeline run."""
 
     batch_id: str
+    prepared_df: pd.DataFrame
     prepared_snapshot: SnapshotPaths
     slices: list[SliceOutcome]
     assignments_path: Path
     assignments_df: pd.DataFrame
+    metrics_path: Path
+    cohesion_report: Path | None
 
 
 class PipelineRunner:
@@ -62,6 +67,8 @@ class PipelineRunner:
         self.builder = BatchBuilder(settings=self.settings, text_column=text_column)
         self.proposer = ClusterProposer(registry=self.registry, settings=self.settings)
         self.judge = AssignmentJudge(registry=self.registry, settings=self.settings)
+        self.metrics_tracker = MetricsTracker(settings=self.settings)
+        self.cohesion_checker = CohesionChecker(settings=self.settings)
         self.results_dir = Path(self.settings.results_dir)
         self.results_dir.mkdir(parents=True, exist_ok=True)
 
@@ -94,12 +101,27 @@ class PipelineRunner:
             dataframe=assignments_df,
         )
 
+        metrics_row = self._build_metrics(
+            batch_id=build_result.batch_id,
+            assignments_df=assignments_df,
+            slices=slice_outcomes,
+        )
+        metrics_path = self.metrics_tracker.append(metrics_row)
+        cohesion_report = self.cohesion_checker.run(
+            batch_id=build_result.batch_id,
+            assignments=assignments_df,
+            prepared_df=build_result.prepared,
+        )
+
         return PipelineResult(
             batch_id=build_result.batch_id,
+            prepared_df=build_result.prepared,
             prepared_snapshot=build_result.prepared_snapshot,
             slices=slice_outcomes,
             assignments_path=assignments_path,
             assignments_df=assignments_df,
+            metrics_path=metrics_path,
+            cohesion_report=cohesion_report,
         )
 
     def _candidate_clusters(
@@ -142,4 +164,34 @@ class PipelineRunner:
         except (ImportError, ValueError):
             # Fall back to CSV path when parquet is unavailable
             return csv_path
+
+    def _build_metrics(
+        self,
+        batch_id: str,
+        assignments_df: pd.DataFrame,
+        slices: Sequence[SliceOutcome],
+    ) -> dict[str, float | int | str]:
+        total = len(assignments_df.index)
+        assigned = int(assignments_df["cluster_id"].notna().sum()) if total else 0
+        skipped = int((assignments_df["decision"] == "skip").sum()) if total else 0
+        coverage_pct = (assigned / total * 100) if total else 0.0
+        skipped_pct = (skipped / total * 100) if total else 0.0
+        proposer_latency = sum(slice_result.proposer.latency_ms for slice_result in slices)
+        judge_latency = sum(
+            assignment.latency_ms for slice_result in slices for assignment in slice_result.assignments
+        )
+        token_estimate = sum(slice_result.proposer.token_estimate for slice_result in slices) + sum(
+            assignment.token_estimate for slice_result in slices for assignment in slice_result.assignments
+        )
+
+        return {
+            "batch_id": batch_id,
+            "requests_total": total,
+            "requests_assigned": assigned,
+            "coverage_pct": round(coverage_pct, 2),
+            "skipped_pct": round(skipped_pct, 2),
+            "proposer_latency_ms": round(proposer_latency, 2),
+            "judge_latency_ms": round(judge_latency, 2),
+            "token_estimate": token_estimate,
+        }
 
