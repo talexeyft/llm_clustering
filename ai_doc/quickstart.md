@@ -240,26 +240,44 @@ print(f"Clusters found: {len(result.clusters)}")
 print(result.assignments.head())
 ```
 
-### Использование с кастомной LLM
+### Использование с кастомной LLM (УПРОЩЕНО!)
 
 ```python
-from llm_clustering import ClusteringPipeline, BaseLLMProvider
+from llm_clustering import ClusteringPipeline, SimpleLLMProvider
 
-class MyCustomLLM(BaseLLMProvider):
+class MyCustomLLM(SimpleLLMProvider):
+    """Только 1 метод нужен - chat_completion()!"""
+    
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+        self.api_url = "https://api.your-llm.com"
+    
     def chat_completion(self, messages, temperature=None, max_tokens=None):
         # Ваша реализация вызова LLM
-        return "JSON response from your LLM"
+        import requests
+        response = requests.post(
+            f"{self.api_url}/chat",
+            json={"messages": messages, "temperature": temperature},
+            headers={"Authorization": f"Bearer {self.api_key}"}
+        )
+        return response.json()["content"]
     
-    # Остальные методы можно не реализовывать, если не нужны
-    def embed(self, texts): raise NotImplementedError()
-    def cluster(self, texts, num_clusters=None): raise NotImplementedError()
-    def describe_cluster(self, texts): raise NotImplementedError()
+    # describe_cluster() работает автоматически!
+    # embed() и cluster() опциональны (NotImplementedError по умолчанию)
 
 # Использование кастомной LLM
-custom_llm = MyCustomLLM()
+custom_llm = MyCustomLLM(api_key="your-key")
 pipeline = ClusteringPipeline(llm_provider=custom_llm)
 result = pipeline.fit(df, text_column="text")
 ```
+
+**Преимущества SimpleLLMProvider:**
+- ✅ Только 1 метод: `chat_completion()`
+- ✅ `describe_cluster()` работает автоматически
+- ✅ `embed()` и `cluster()` опциональны
+- ✅ В 4 раза проще чем `BaseLLMProvider`
+
+Подробнее: см. `doc/adding_custom_provider.md` и `examples.py` (Example 2)
 
 ### Итеративная обработка
 
@@ -448,6 +466,9 @@ PYTHONPATH=src:$PYTHONPATH python -m llm_clustering.main --input ai_data/demo_sa
 ### Тестовые команды
 
 ```bash
+# Standalone пример: полная кластеризация 1000 обращений с Ollama и кастомным промптом
+python examples/standalone_ollama_example.py
+
 # Тест библиотечного API
 PYTHONPATH=src:$PYTHONPATH python ai_experiments/test_library_api.py
 
