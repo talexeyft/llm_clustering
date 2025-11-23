@@ -44,6 +44,7 @@ ENV/
 # Data and experiments
 ai_data/*
 !ai_data/.gitkeep
+!ai_data/demo_sample.csv.zip
 ai_experiments/*
 !ai_experiments/.gitkeep
 

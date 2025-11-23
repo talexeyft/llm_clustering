@@ -15,6 +15,25 @@ python -c "import llm_clustering; print(llm_clustering.__version__)"
 llm-clustering --help
 ```
 
+## Демо-данные
+
+В репозитории включен файл `ai_data/demo_sample.csv.zip` с 1000 случайных сэмплов для демонстрации работы кластеризации.
+
+```bash
+# Распаковать демо-данные
+unzip ai_data/demo_sample.csv.zip -d ai_data/
+
+# Запустить кластеризацию на демо-данных (20 сэмплов)
+source venv/bin/activate
+export $(cat .env | grep -v '^#' | grep -v '^$' | xargs)
+PYTHONPATH=src:$PYTHONPATH python -m llm_clustering.main \
+  --input ai_data/demo_sample.csv \
+  --limit 20 \
+  --batch-id demo_test
+```
+
+Этот файл предназначен для быстрого старта и демонстрации возможностей без необходимости настройки полного датасета.
+
 ## Настройка
 
 ```bash
