@@ -4,20 +4,18 @@ from __future__ import annotations
 
 import json
 import re
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any, Iterable, Literal, Sequence, cast
 
 from loguru import logger
 
+from llm_clustering.clustering.base_llm_component import BaseLLMComponent
 from llm_clustering.clustering.registry import ClusterRecord, ClusterRegistry
-from llm_clustering.config import Settings, get_settings
-from llm_clustering.llm import get_llm_provider
+from llm_clustering.clustering.schemas import JudgeResponse, SuggestedCluster
+from llm_clustering.config import Settings
 from llm_clustering.llm.base import BaseLLMProvider
 from llm_clustering.llm.prompts import (
-    PromptLogEntry,
-    PromptLogger,
     RenderedPrompt,
     render_assignment_judge_prompt,
 )
@@ -43,7 +41,7 @@ class AssignmentResult:
     suggested_cluster: ClusterRecord | None = None
 
 
-class AssignmentJudge:
+class AssignmentJudge(BaseLLMComponent):
     """Evaluates each request against the registry and batch clusters."""
 
     def __init__(
@@ -53,11 +51,7 @@ class AssignmentJudge:
         settings: Settings | None = None,
         business_context: str | None = None,
     ) -> None:
-        self.settings = settings or get_settings()
-        self.registry = registry or ClusterRegistry(settings=self.settings)
-        self.llm = llm or get_llm_provider()
-        self.prompt_logger = PromptLogger(self.settings)
-        self.business_context = business_context
+        super().__init__(registry, llm, settings, business_context)
 
     def judge_slice(
         self,
@@ -79,7 +73,7 @@ class AssignmentJudge:
 
         # Use config value if not explicitly provided
         if parallel_batch_size is None:
-            parallel_batch_size = self.settings.batch_config.parallel_inference_batch_size
+            parallel_batch_size = self.settings.parallel_batch_size
 
         cluster_payload = self._format_clusters(candidate_clusters)
         records = dataframe.to_dict(orient="records")
@@ -141,30 +135,40 @@ class AssignmentJudge:
         latency_ms = latency * 1000
 
         try:
-            from llm_clustering.clustering.utils import extract_json_from_response
-            response_payload = extract_json_from_response(response_text)
-            if not isinstance(response_payload, dict):
-                raise ValueError("Judge response must be a JSON object.")
-        except json.JSONDecodeError as err:
-            logger.error("Judge returned invalid JSON for %s: %s", record.get("request_id"), err)
-            logger.error("Original response: %s", response_text[:500])
+            json_data = self._parse_json_response(response_text, "judge")
+            judge_response = JudgeResponse.model_validate(json_data)
+        except (json.JSONDecodeError, ValueError) as err:
+            logger.error("Judge returned invalid response for %s: %s", record.get("request_id"), err)
             return AssignmentResult(
                 batch_id=batch_slice.batch_id,
                 slice_id=batch_slice.slice_id,
                 request_id=str(record.get("request_id")),
                 decision="skip",
                 cluster_id=None,
-                confidence_text="low (invalid JSON)",
+                confidence_text="low (invalid response)",
                 llm_rationale="Ответ модели нельзя разобрать.",
                 raw_response={},
                 latency_ms=round(latency_ms, 2),
                 token_estimate=0,
             )
+        except Exception as err:
+            logger.error("Failed to validate judge response for %s: %s", record.get("request_id"), err)
+            return AssignmentResult(
+                batch_id=batch_slice.batch_id,
+                slice_id=batch_slice.slice_id,
+                request_id=str(record.get("request_id")),
+                decision="skip",
+                cluster_id=None,
+                confidence_text="low (validation error)",
+                llm_rationale="Ошибка валидации ответа.",
+                raw_response={},
+                latency_ms=round(latency_ms, 2),
+                token_estimate=0,
+            )
 
-        result = self._build_result(
+        result = self._build_result_from_response(
             batch_slice=batch_slice,
-            request_record=record,
-            response=response_payload,
+            judge_response=judge_response,
             cluster_context=candidate_clusters,
             latency_ms=latency_ms,
             token_estimate=self._estimate_tokens(prompt, response_text),
@@ -174,7 +178,7 @@ class AssignmentJudge:
             batch_slice=batch_slice,
             request_id=result.request_id,
             prompt=prompt,
-            response=response_payload,
+            response=json_data,
             latency_ms=latency_ms,
         )
 
@@ -193,41 +197,20 @@ class AssignmentJudge:
             business_context=self.business_context,
         )
 
-    def _execute_prompt(self, prompt: RenderedPrompt) -> tuple[str, float]:
-        messages = [
-            {"role": "system", "content": prompt.system},
-            {"role": "user", "content": prompt.user},
-        ]
-        start = time.perf_counter()
-        response_text = self.llm.chat_completion(
-            messages,
-            temperature=self.settings.llm_config.temperature,
-            max_tokens=self.settings.llm_config.max_tokens,
-        )
-        latency = time.perf_counter() - start
-        return response_text, latency
-
-    def _build_result(
+    def _build_result_from_response(
         self,
         batch_slice: BatchSlice,
-        request_record: dict[str, Any],
-        response: dict[str, Any],
+        judge_response: JudgeResponse,
         cluster_context: Sequence[ClusterRecord],
         latency_ms: float,
         token_estimate: int,
     ) -> AssignmentResult:
-        decision = str(response.get("decision") or "skip").strip().lower()
-        if decision not in {"assign", "new_cluster", "skip"}:
-            decision = "skip"
+        """Build AssignmentResult from validated JudgeResponse."""
+        decision = judge_response.decision
         decision_literal = cast(DecisionLiteral, decision)
-
-        request_id = str(response.get("request_id") or request_record.get("request_id"))
-        cluster_id = response.get("cluster_id")
-        cluster_id = str(cluster_id).strip() if cluster_id else None
-        confidence_text = str(response.get("confidence_text") or "low").strip()
-        rationale = str(response.get("llm_rationale") or "").strip()
-        suggested_payload = response.get("suggested_cluster") or {}
-
+        request_id = judge_response.request_id
+        cluster_id = judge_response.cluster_id or None
+        
         suggested_cluster = None
         if decision == "assign" and cluster_id:
             try:
@@ -235,10 +218,11 @@ class AssignmentJudge:
             except KeyError:
                 logger.warning("Cluster %s missing; downgrading decision to skip.", cluster_id)
                 decision = "skip"
+                decision_literal = "skip"
                 cluster_id = None
-        elif decision == "new_cluster" and suggested_payload:
-            suggested_cluster = self._convert_to_cluster(
-                suggested_payload,
+        elif decision == "new_cluster" and judge_response.suggested_cluster:
+            suggested_cluster = self._convert_suggested_to_cluster(
+                judge_response.suggested_cluster,
                 batch_slice=batch_slice,
                 request_id=request_id,
             )
@@ -254,42 +238,40 @@ class AssignmentJudge:
             request_id=request_id,
             decision=decision_literal,
             cluster_id=cluster_id,
-            confidence_text=confidence_text,
-            llm_rationale=rationale,
-            raw_response=response,
-             latency_ms=round(latency_ms, 2),
-             token_estimate=token_estimate,
+            confidence_text=judge_response.confidence_text,
+            llm_rationale=judge_response.llm_rationale,
+            raw_response=judge_response.model_dump(),
+            latency_ms=round(latency_ms, 2),
+            token_estimate=token_estimate,
             suggested_cluster=suggested_cluster,
         )
 
-    def _convert_to_cluster(
+    def _convert_suggested_to_cluster(
         self,
-        payload: dict[str, Any],
+        suggested: SuggestedCluster,
         batch_slice: BatchSlice,
         request_id: str,
     ) -> ClusterRecord | None:
-        name = str(payload.get("name") or "").strip()
-        summary = str(payload.get("summary") or "").strip()
-        if not name or not summary:
+        """Convert validated SuggestedCluster to ClusterRecord."""
+        if not suggested.name or not suggested.summary:
             return None
 
-        cluster_id = payload.get("cluster_id") or name
+        cluster_id = suggested.cluster_id or suggested.name
         slug = self._sanitize_cluster_id(cluster_id)
-        sample_requests = payload.get("sample_request_ids") or []
-        if not isinstance(sample_requests, list):
-            sample_requests = []
+        
+        sample_requests = list(suggested.sample_request_ids)
         if request_id not in sample_requests:
             sample_requests.insert(0, request_id)
 
         return ClusterRecord(
-            cluster_id=slug or self._fallback_cluster_id(name, batch_slice.slice_id),
-            name=name,
-            summary=summary,
-            criteria=str(payload.get("criteria") or ""),
-            sample_requests=[str(item) for item in sample_requests][:5],
+            cluster_id=slug or self._fallback_cluster_id(suggested.name, batch_slice.slice_id),
+            name=suggested.name,
+            summary=suggested.summary,
+            criteria=suggested.criteria,
+            sample_requests=sample_requests[:5],
             batch_id=batch_slice.batch_id,
             status="tentative",
-            llm_reasoning=str(payload.get("llm_rationale") or ""),
+            llm_reasoning=suggested.llm_rationale or "",
         )
 
     @staticmethod
@@ -326,23 +308,18 @@ class AssignmentJudge:
         response: dict[str, Any],
         latency_ms: float,
     ) -> None:
-        entry = PromptLogEntry(
+        response_text = json.dumps(response, ensure_ascii=False)
+        entry = self._create_log_entry(
             prompt_name="assignment_judge_v0",
             batch_id=batch_slice.batch_id,
             slice_id=batch_slice.slice_id,
-            prompt={"system": prompt.system, "user": prompt.user},
+            prompt=prompt,
             response=response,
-            latency_ms=round(latency_ms, 2),
-            cost_estimate=None,
+            latency_ms=latency_ms,
             metadata={
                 "request_id": request_id,
-                "token_estimate": self._estimate_tokens(prompt, json.dumps(response, ensure_ascii=False)),
+                "token_estimate": self._estimate_tokens(prompt, response_text),
             },
         )
         self.prompt_logger.log(entry)
-
-    @staticmethod
-    def _estimate_tokens(prompt: RenderedPrompt, response_text: str) -> int:
-        total_chars = len(prompt.system) + len(prompt.user) + len(response_text)
-        return max(1, total_chars // 4)
 

@@ -25,6 +25,7 @@ from llm_clustering.api import ClusteringPipeline, ClusteringResult, PartialResu
 from llm_clustering.clustering.registry import ClusterRecord, ClusterRegistry
 from llm_clustering.config import Settings
 from llm_clustering.llm.base import BaseLLMProvider
+from llm_clustering.llm.simple_provider import SimpleLLMProvider
 
 __all__ = [
     # Main API
@@ -38,6 +39,7 @@ __all__ = [
     "Settings",
     # LLM integration
     "BaseLLMProvider",
+    "SimpleLLMProvider",
     # Version
     "__version__",
 ]

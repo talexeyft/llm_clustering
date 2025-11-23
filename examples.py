@@ -2,11 +2,12 @@
 
 This file demonstrates various use cases:
 1. Basic usage with default settings
-2. Using custom LLM provider
+2. Using custom LLM provider (SIMPLIFIED - only 1 method needed!)
 3. Iterative processing with partial results
 4. Re-fitting with existing cluster knowledge
 5. Saving and loading clusters
 6. Using business context for domain-specific clustering
+7. Complete workflow with all features
 """
 
 import pandas as pd
@@ -17,6 +18,7 @@ from llm_clustering import (
     ClusteringPipeline,
     ClusteringResult,
     BaseLLMProvider,
+    SimpleLLMProvider,
     Settings,
 )
 
@@ -64,13 +66,28 @@ def example_1_basic_usage():
 
 
 # =============================================================================
-# Example 2: Custom LLM Provider
+# Example 2: Custom LLM Provider (Simplified!)
 # =============================================================================
-class CustomLLMProvider(BaseLLMProvider):
-    """Example of custom LLM provider implementation."""
+class CustomLLMProvider(SimpleLLMProvider):
+    """Example of custom LLM provider - only ONE method needed!
     
-    def __init__(self, api_key: str, model: str):
+    SimpleLLMProvider already implements:
+    - describe_cluster() using chat_completion()
+    - embed() and cluster() as NotImplementedError (optional methods)
+    
+    You only need to implement chat_completion()!
+    """
+    
+    def __init__(self, api_key: str, api_url: str = "https://api.your-llm.com", model: str = "your-model"):
+        """Initialize your custom LLM provider.
+        
+        Args:
+            api_key: Your API key
+            api_url: Base URL of your LLM API
+            model: Model name to use
+        """
         self.api_key = api_key
+        self.api_url = api_url
         self.model = model
     
     def chat_completion(
@@ -79,52 +96,57 @@ class CustomLLMProvider(BaseLLMProvider):
         temperature: float | None = None,
         max_tokens: int | None = None,
     ) -> str:
-        """Implement your custom LLM call here."""
-        # This is a placeholder - implement your actual LLM call
-        # For example, calling your own API:
+        """This is the ONLY method you must implement!
+        
+        Example implementation with requests:
+        """
+        # Uncomment and customize for your API:
+        # import requests
         # response = requests.post(
-        #     "https://your-llm-api.com/chat",
-        #     json={"messages": messages, "temperature": temperature},
+        #     f"{self.api_url}/chat/completions",
+        #     json={
+        #         "model": self.model,
+        #         "messages": messages,
+        #         "temperature": temperature or 0.7,
+        #         "max_tokens": max_tokens or 2000,
+        #     },
         #     headers={"Authorization": f"Bearer {self.api_key}"}
         # )
-        # return response.json()["content"]
+        # return response.json()["choices"][0]["message"]["content"]
         
-        raise NotImplementedError("Implement your LLM provider here")
-    
-    def embed(self, texts: list[str]) -> list[list[float]]:
-        """Optional: implement embeddings if needed."""
-        raise NotImplementedError("Embeddings not implemented")
-    
-    def cluster(self, texts: list[str], num_clusters: int | None = None) -> list[int]:
-        """Optional: implement clustering if needed."""
-        raise NotImplementedError("Clustering not implemented")
-    
-    def describe_cluster(self, texts: list[str]) -> str:
-        """Optional: implement cluster description if needed."""
-        raise NotImplementedError("Cluster description not implemented")
+        raise NotImplementedError(
+            "Implement your LLM API call here. "
+            "See the commented code above for an example."
+        )
 
 
 def example_2_custom_llm():
-    """Use custom LLM provider."""
+    """Use custom LLM provider - super simple now!"""
     print("=" * 80)
-    print("Example 2: Custom LLM Provider")
+    print("Example 2: Custom LLM Provider (Simplified!)")
     print("=" * 80)
     
-    # Create your custom LLM provider
+    print("\nWith SimpleLLMProvider, you only need to implement chat_completion()!")
+    print("All other methods (describe_cluster, embed, cluster) have defaults.\n")
+    
+    # Create your custom LLM provider - just need API credentials
     custom_llm = CustomLLMProvider(
         api_key="your-api-key",
+        api_url="https://api.your-llm.com",
         model="your-model-name"
     )
     
-    # Initialize pipeline with custom LLM
+    # Initialize pipeline with custom LLM - works the same way!
     pipeline = ClusteringPipeline(llm_provider=custom_llm)
     
-    # Rest is the same as example 1
+    # Rest is exactly the same as example 1
     df = pd.DataFrame({"text": ["Example text 1", "Example text 2"]})
     # result = pipeline.fit(df, text_column="text")
     
-    print("Custom LLM provider initialized successfully")
-    print("(Skipping actual clustering - implement your LLM first)")
+    print("✓ Custom LLM provider initialized successfully")
+    print("✓ Only chat_completion() method needed")
+    print("✓ describe_cluster() works automatically")
+    print("\n(Skipping actual clustering - implement your chat_completion() first)")
 
 
 # =============================================================================

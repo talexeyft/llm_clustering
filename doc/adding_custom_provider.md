@@ -1,433 +1,502 @@
 # Добавление собственного провайдера LLM
 
-Эта инструкция описывает процесс добавления нового провайдера LLM в проект `llm_clustering`.
+Эта инструкция описывает **упрощенный** процесс добавления нового провайдера LLM в проект `llm_clustering`.
+
+> **Примечание о рефакторинге (ноябрь 2024):** Архитектура была упрощена:
+> - Создан `BaseLLMComponent` для устранения дублирования кода
+> - Добавлена Pydantic-валидация LLM ответов
+> - Settings теперь имеет плоскую структуру (без вложенных config классов)
+> - `PipelineRunner` объединен с `ClusteringPipeline`
+
+## 🎯 Быстрый старт: SimpleLLMProvider
+
+**Хорошая новость:** Теперь для добавления своего LLM нужно реализовать **всего 1 метод** - `chat_completion()`!
+
+### Минимальный пример
+
+```python
+from llm_clustering import SimpleLLMProvider, ClusteringPipeline
+import requests
+
+class MyCustomLLM(SimpleLLMProvider):
+    """Ваш кастомный LLM провайдер - всего 1 метод!"""
+    
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+        self.api_url = "https://api.your-llm.com"
+        self.model = "your-model-name"
+    
+    def chat_completion(self, messages, temperature=None, max_tokens=None):
+        """Единственный метод, который нужно реализовать."""
+        response = requests.post(
+            f"{self.api_url}/chat/completions",
+            json={
+                "model": self.model,
+                "messages": messages,
+                "temperature": temperature or 0.7,
+                "max_tokens": max_tokens or 2000,
+            },
+            headers={"Authorization": f"Bearer {self.api_key}"}
+        )
+        return response.json()["choices"][0]["message"]["content"]
+
+# Использование
+llm = MyCustomLLM(api_key="your-api-key")
+pipeline = ClusteringPipeline(llm_provider=llm)
+result = pipeline.fit(df, text_column="text")
+```
+
+**Вот и всё!** SimpleLLMProvider автоматически предоставит:
+- ✅ `describe_cluster()` - через ваш `chat_completion()`
+- ✅ `embed()` и `cluster()` - как `NotImplementedError` (они опциональны)
+
+---
 
 ## Обзор архитектуры
 
-Все провайдеры LLM наследуются от базового класса `BaseLLMProvider` и должны реализовать три обязательных метода:
+### Два базовых класса на выбор
 
-- `embed()` - генерация эмбеддингов для списка текстов
-- `cluster()` - кластеризация текстов с использованием LLM
-- `describe_cluster()` - генерация описания кластера текстов
-
-Провайдеры регистрируются в `LLMFactory` и могут быть использованы через фабрику или напрямую.
-
-## Шаги добавления провайдера
-
-### 1. Создание класса провайдера
-
-Создайте новый файл в директории `src/llm_clustering/llm/` с именем `{provider_name}_provider.py`.
-
-Пример структуры:
+#### 1. SimpleLLMProvider (⭐ Рекомендуется)
+Для большинства случаев - нужен только `chat_completion()`.
 
 ```python
-"""Описание провайдера LLM."""
+from llm_clustering import SimpleLLMProvider
 
-from typing import Any
-
-from loguru import logger
-
-from llm_clustering.config import get_settings
-from llm_clustering.llm.base import BaseLLMProvider
-
-
-class CustomProvider(BaseLLMProvider):
-    """Описание провайдера для эмбеддингов и кластеризации."""
-
-    def __init__(self) -> None:
-        """Инициализация провайдера."""
-        settings = get_settings()
-        # Загрузите необходимые настройки из конфигурации
-        self.api_key = settings.custom_api_key
-        self.api_url = settings.custom_api_url or "https://api.example.com"
-        self.model = settings.custom_model or "default-model"
-        self.temperature = settings.default_temperature
-        self.max_tokens = settings.default_max_tokens
-
-        # Валидация обязательных параметров
-        if not self.api_key:
-            raise ValueError(
-                "Custom API key is required. Set CUSTOM_API_KEY in .env file"
-            )
-
-    def embed(self, texts: list[str]) -> list[list[float]]:
-        """Генерация эмбеддингов для списка текстов."""
-        # Реализуйте логику генерации эмбеддингов
-        embeddings = []
-        for text in texts:
-            # Ваша логика здесь
-            embedding = self._get_embedding(text)
-            embeddings.append(embedding)
-        return embeddings
-
-    def cluster(self, texts: list[str], num_clusters: int | None = None) -> list[int]:
-        """Кластеризация текстов с использованием LLM."""
-        # Реализуйте логику кластеризации
-        # Возвращает список индексов кластеров для каждого текста
-        raise NotImplementedError("Clustering logic to be implemented")
-
-    def describe_cluster(self, texts: list[str]) -> str:
-        """Генерация описания кластера текстов."""
-        # Создайте промпт для описания кластера
-        prompt = f"""Проанализируй следующие обращения клиентов в контакт-центр и создай краткое описание общей темы или проблемы:
-
-{chr(10).join(f"- {text}" for text in texts[:10])}
-
-Создай краткое описание (1-2 предложения) общей темы этих обращений на русском языке."""
-
-        # Выполните запрос к API
-        response = self._make_request(prompt)
-        
-        # Извлеките и верните описание
-        description = self._extract_description(response)
-        return description.strip()
-
-    def _make_request(self, prompt: str) -> dict[str, Any]:
-        """Вспомогательный метод для выполнения запросов к API."""
-        # Реализуйте логику HTTP-запросов
-        # Используйте requests, httpx, urllib3 или клиентскую библиотеку провайдера
-        pass
-
-    def _get_embedding(self, text: str) -> list[float]:
-        """Вспомогательный метод для получения эмбеддинга одного текста."""
-        # Реализуйте логику получения эмбеддинга
-        pass
-
-    def _extract_description(self, response: dict[str, Any]) -> str:
-        """Вспомогательный метод для извлечения описания из ответа API."""
-        # Реализуйте логику парсинга ответа
+class MyLLM(SimpleLLMProvider):
+    def chat_completion(self, messages, temperature=None, max_tokens=None) -> str:
+        # Ваша реализация
         pass
 ```
 
-### 2. Добавление настроек в конфигурацию
+**Автоматически получаете:**
+- `describe_cluster()` - работает через `chat_completion()`
+- `embed()` и `cluster()` - заглушки (опциональные методы)
 
-Добавьте необходимые настройки в `src/llm_clustering/config/settings.py`:
+#### 2. BaseLLMProvider (Продвинутый)
+Если нужен полный контроль над всеми методами.
+
+```python
+from llm_clustering import BaseLLMProvider
+
+class AdvancedLLM(BaseLLMProvider):
+    def chat_completion(self, messages, ...) -> str: pass
+    def describe_cluster(self, texts) -> str: pass
+    def embed(self, texts) -> list[list[float]]: pass
+    def cluster(self, texts, num_clusters) -> list[int]: pass
+```
+
+---
+
+## Шаг за шагом: Добавление провайдера
+
+### Вариант A: Простое использование (без регистрации в фабрике)
+
+Если вам нужен провайдер только для вашего проекта - просто используйте его напрямую:
+
+```python
+# my_llm.py
+from llm_clustering import SimpleLLMProvider
+
+class MyLLM(SimpleLLMProvider):
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+    
+    def chat_completion(self, messages, temperature=None, max_tokens=None):
+        # Ваша реализация
+        pass
+
+# Использование
+from llm_clustering import ClusteringPipeline
+from my_llm import MyLLM
+
+pipeline = ClusteringPipeline(llm_provider=MyLLM(api_key="xxx"))
+```
+
+### Вариант B: Полная интеграция (регистрация в фабрике)
+
+Если хотите добавить провайдер в библиотеку:
+
+#### 1. Создайте файл провайдера
+
+`src/llm_clustering/llm/my_provider.py`:
+
+```python
+"""My custom LLM provider."""
+
+from llm_clustering.llm.simple_provider import SimpleLLMProvider
+from llm_clustering.config import get_settings
+from loguru import logger
+
+
+class MyProvider(SimpleLLMProvider):
+    """My custom LLM provider."""
+    
+    def __init__(self) -> None:
+        """Initialize provider from settings."""
+        settings = get_settings()
+        self.api_key = settings.my_api_key
+        self.api_url = settings.my_api_url or "https://api.example.com"
+        self.model = settings.my_model or "default-model"
+        
+        if not self.api_key:
+            raise ValueError("MY_API_KEY is required in .env file")
+    
+    def chat_completion(
+        self,
+        messages: list[dict[str, str]],
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ) -> str:
+        """Chat completion implementation."""
+        import requests
+        
+        try:
+            response = requests.post(
+                f"{self.api_url}/chat/completions",
+                json={
+                    "model": self.model,
+                    "messages": messages,
+                    "temperature": temperature or 0.7,
+                    "max_tokens": max_tokens or 2000,
+                },
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                timeout=60
+            )
+            response.raise_for_status()
+            return response.json()["choices"][0]["message"]["content"]
+        except Exception as e:
+            logger.error(f"API error: {e}")
+            raise
+```
+
+#### 2. Добавьте настройки
+
+`src/llm_clustering/config/settings.py`:
 
 ```python
 class Settings(BaseSettings):
     # ... существующие настройки ...
     
-    # Custom Provider specific
-    custom_api_key: str = ""
-    custom_api_url: str = "https://api.example.com"
-    custom_model: str = "default-model"
+    # My Provider
+    my_api_key: str = ""
+    my_api_url: str = "https://api.example.com"
+    my_model: str = "default-model"
 ```
 
-Также добавьте соответствующие переменные окружения в `env.example`:
+`env.example`:
 
 ```bash
-# Custom Provider
-CUSTOM_API_KEY=your_api_key_here
-CUSTOM_API_URL=https://api.example.com
-CUSTOM_MODEL=default-model
+# My Provider
+MY_API_KEY=your_api_key_here
+MY_API_URL=https://api.example.com
+MY_MODEL=default-model
 ```
 
-### 3. Регистрация провайдера в фабрике
+#### 3. Зарегистрируйте в фабрике
 
-Добавьте импорт и регистрацию провайдера в `src/llm_clustering/llm/factory.py`:
+`src/llm_clustering/llm/factory.py`:
 
 ```python
-from llm_clustering.llm.custom_provider import CustomProvider
+from llm_clustering.llm.my_provider import MyProvider
 
 class LLMFactory:
-    """Factory for creating LLM providers."""
-
     _providers: dict[str, type[BaseLLMProvider]] = {
         "openai": OpenAIProvider,
         "anthropic": AnthropicProvider,
         "openrouter": OpenRouterProvider,
         "ollama": OllamaProvider,
-        "custom": CustomProvider,  # Добавьте ваш провайдер
+        "my_provider": MyProvider,  # <-- Добавьте здесь
     }
 ```
 
-### 4. Экспорт провайдера (опционально)
+#### 4. Экспортируйте (опционально)
 
-Если нужно, добавьте экспорт в `src/llm_clustering/llm/__init__.py`:
+`src/llm_clustering/llm/__init__.py`:
 
 ```python
-from llm_clustering.llm.custom_provider import CustomProvider
+from llm_clustering.llm.my_provider import MyProvider
 
 __all__ = [
-    # ... существующие экспорты ...
-    "CustomProvider",
+    # ...
+    "MyProvider",
 ]
 ```
 
+---
+
 ## Примеры реализации
 
-### Пример 1: REST API провайдер (как OpenRouter)
+### Пример 1: REST API с requests
 
 ```python
-"""Пример провайдера с REST API."""
-
+from llm_clustering import SimpleLLMProvider
 import requests
 from loguru import logger
-from llm_clustering.config import get_settings
-from llm_clustering.llm.base import BaseLLMProvider
 
 
-class RESTProvider(BaseLLMProvider):
-    """Провайдер с REST API."""
-
-    API_URL = "https://api.example.com/v1"
-
-    def __init__(self) -> None:
-        """Инициализация провайдера."""
-        settings = get_settings()
-        self.api_key = settings.rest_api_key
-        self.model = settings.rest_model or "default-model"
-        self.temperature = settings.default_temperature
-        self.max_tokens = settings.default_max_tokens
-
-        if not self.api_key:
-            raise ValueError("REST API key is required")
-
-    def _make_request(
-        self,
-        endpoint: str,
-        payload: dict[str, Any],
-    ) -> dict[str, Any]:
-        """Выполнение запроса к REST API."""
-        url = f"{self.API_URL}/{endpoint}"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-
+class RESTAPIProvider(SimpleLLMProvider):
+    """Provider для стандартного REST API."""
+    
+    def __init__(self, api_key: str, base_url: str, model: str):
+        self.api_key = api_key
+        self.base_url = base_url
+        self.model = model
+    
+    def chat_completion(self, messages, temperature=None, max_tokens=None):
         try:
-            response = requests.post(url, headers=headers, json=payload, timeout=60)
+            response = requests.post(
+                f"{self.base_url}/v1/chat/completions",
+                json={
+                    "model": self.model,
+                    "messages": messages,
+                    "temperature": temperature or 0.7,
+                    "max_tokens": max_tokens or 2000,
+                },
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                timeout=60
+            )
             response.raise_for_status()
-            return response.json()
-        except requests.exceptions.RequestException as e:
-            logger.error(f"REST API error: {e}")
-            if hasattr(e, "response") and e.response is not None:
-                logger.error(f"Response: {e.response.text}")
+            return response.json()["choices"][0]["message"]["content"]
+        except requests.RequestException as e:
+            logger.error(f"API request failed: {e}")
             raise
+```
 
-    def embed(self, texts: list[str]) -> list[list[float]]:
-        """Генерация эмбеддингов."""
-        embeddings = []
-        for text in texts:
-            payload = {"model": self.model, "input": text}
-            response = self._make_request("embeddings", payload)
-            embeddings.append(response.get("data", [{}])[0].get("embedding", []))
-        return embeddings
+### Пример 2: Локальный Ollama (без SDK)
 
-    def cluster(self, texts: list[str], num_clusters: int | None = None) -> list[int]:
-        """Кластеризация текстов."""
-        # Реализуйте логику кластеризации
-        raise NotImplementedError
+```python
+from llm_clustering import SimpleLLMProvider
+import urllib3
+import json
 
-    def describe_cluster(self, texts: list[str]) -> str:
-        """Генерация описания кластера."""
-        prompt = f"""Проанализируй следующие обращения клиентов в контакт-центр и создай краткое описание общей темы или проблемы:
 
-{chr(10).join(f"- {text}" for text in texts[:10])}
-
-Создай краткое описание (1-2 предложения) общей темы этих обращений на русском языке."""
-
+class LocalOllamaProvider(SimpleLLMProvider):
+    """Provider для локального Ollama."""
+    
+    def __init__(self, model: str = "llama3", api_url: str = "http://localhost:11434"):
+        self.model = model
+        self.api_url = api_url
+        self.http = urllib3.PoolManager()
+    
+    def chat_completion(self, messages, temperature=None, max_tokens=None):
         payload = {
             "model": self.model,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": self.temperature,
-            "max_tokens": self.max_tokens,
+            "messages": messages,
+            "stream": False,
+            "options": {
+                "temperature": temperature or 0.7,
+                "num_predict": max_tokens or 2000,
+            }
         }
-
-        response = self._make_request("chat/completions", payload)
-        return response["choices"][0]["message"]["content"].strip()
+        
+        response = self.http.request(
+            "POST",
+            f"{self.api_url}/api/chat",
+            body=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"}
+        )
+        
+        return json.loads(response.data)["message"]["content"]
 ```
 
-### Пример 2: Локальный провайдер (как Ollama)
+### Пример 3: OpenAI-совместимый SDK
 
 ```python
-"""Пример локального провайдера."""
-
-import json
-import urllib3
-from loguru import logger
-from llm_clustering.config import get_settings
-from llm_clustering.llm.base import BaseLLMProvider
-
-urllib3.disable_warnings()
+from llm_clustering import SimpleLLMProvider
+from openai import OpenAI  # или другой SDK
 
 
-class LocalProvider(BaseLLMProvider):
-    """Локальный провайдер для моделей, запущенных локально."""
-
-    def __init__(self) -> None:
-        """Инициализация провайдера."""
-        settings = get_settings()
-        self.api_url = settings.local_api_url
-        self.model = settings.local_model or "local-model"
-        self.temperature = settings.default_temperature
-        self.max_tokens = settings.default_max_tokens
-
-    def _make_request(
-        self,
-        endpoint: str,
-        payload: dict[str, Any],
-    ) -> dict[str, Any]:
-        """Выполнение запроса к локальному API."""
-        url = f"{self.api_url}/{endpoint}"
-        # Реализуйте логику запроса (аналогично OllamaProvider)
-        # ...
-        pass
-
-    def embed(self, texts: list[str]) -> list[list[float]]:
-        """Генерация эмбеддингов."""
-        # Реализуйте логику
-        pass
-
-    def cluster(self, texts: list[str], num_clusters: int | None = None) -> list[int]:
-        """Кластеризация текстов."""
-        raise NotImplementedError
-
-    def describe_cluster(self, texts: list[str]) -> str:
-        """Генерация описания кластера."""
-        # Реализуйте логику
-        pass
-```
-
-### Пример 3: Провайдер с использованием клиентской библиотеки
-
-```python
-"""Пример провайдера с использованием клиентской библиотеки."""
-
-from vendor_sdk import Client  # Пример клиентской библиотеки
-from loguru import logger
-from llm_clustering.config import get_settings
-from llm_clustering.llm.base import BaseLLMProvider
-
-
-class SDKProvider(BaseLLMProvider):
-    """Провайдер с использованием SDK."""
-
-    def __init__(self) -> None:
-        """Инициализация провайдера."""
-        settings = get_settings()
-        self.api_key = settings.sdk_api_key
-        self.model = settings.sdk_model or "default-model"
-        self.temperature = settings.default_temperature
-        self.max_tokens = settings.default_max_tokens
-
-        if not self.api_key:
-            raise ValueError("SDK API key is required")
-
-        # Инициализация клиента
-        self.client = Client(api_key=self.api_key)
-
-    def embed(self, texts: list[str]) -> list[list[float]]:
-        """Генерация эмбеддингов."""
-        embeddings = []
-        for text in texts:
-            embedding = self.client.embeddings.create(
-                model=self.model,
-                input=text
-            )
-            embeddings.append(embedding.data[0].embedding)
-        return embeddings
-
-    def cluster(self, texts: list[str], num_clusters: int | None = None) -> list[int]:
-        """Кластеризация текстов."""
-        raise NotImplementedError
-
-    def describe_cluster(self, texts: list[str]) -> str:
-        """Генерация описания кластера."""
-        prompt = f"""Проанализируй следующие обращения клиентов в контакт-центр и создай краткое описание общей темы или проблемы:
-
-{chr(10).join(f"- {text}" for text in texts[:10])}
-
-Создай краткое описание (1-2 предложения) общей темы этих обращений на русском языке."""
-
+class OpenAICompatibleProvider(SimpleLLMProvider):
+    """Provider для OpenAI-совместимых API."""
+    
+    def __init__(self, api_key: str, base_url: str, model: str):
+        self.client = OpenAI(api_key=api_key, base_url=base_url)
+        self.model = model
+    
+    def chat_completion(self, messages, temperature=None, max_tokens=None):
         response = self.client.chat.completions.create(
             model=self.model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=self.temperature,
-            max_tokens=self.max_tokens,
+            messages=messages,
+            temperature=temperature or 0.7,
+            max_tokens=max_tokens or 2000,
         )
-        return response.choices[0].message.content.strip()
+        return response.choices[0].message.content
 ```
 
-## Использование нового провайдера
+### Пример 4: Кастомизация describe_cluster
 
-После регистрации провайдера его можно использовать несколькими способами:
+Если хотите изменить стандартное поведение `describe_cluster()`:
 
-### Способ 1: Через фабрику
+```python
+from llm_clustering import SimpleLLMProvider
+
+
+class CustomDescriptionProvider(SimpleLLMProvider):
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+    
+    def chat_completion(self, messages, temperature=None, max_tokens=None):
+        # Ваша реализация
+        pass
+    
+    def describe_cluster(self, texts: list[str]) -> str:
+        """Кастомное описание кластера на английском."""
+        prompt = f"""Analyze these customer requests and provide a brief summary:
+
+{chr(10).join(f"- {text}" for text in texts[:15])}
+
+Provide a brief 1-sentence summary of the main theme."""
+        
+        return self.chat_completion(
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2,
+            max_tokens=100,
+        )
+```
+
+---
+
+## Использование провайдера
+
+### Способ 1: Напрямую
+
+```python
+from my_llm import MyCustomLLM
+from llm_clustering import ClusteringPipeline
+
+llm = MyCustomLLM(api_key="xxx")
+pipeline = ClusteringPipeline(llm_provider=llm)
+result = pipeline.fit(df, text_column="text")
+```
+
+### Способ 2: Через фабрику (если зарегистрирован)
 
 ```python
 from llm_clustering.llm.factory import get_llm_provider
 
-# Использование провайдера по умолчанию
-provider = get_llm_provider()
-
-# Использование конкретного провайдера
-provider = get_llm_provider("custom")
+# Использование по имени
+llm = get_llm_provider("my_provider")
 ```
 
-### Способ 2: Напрямую
-
-```python
-from llm_clustering.llm.custom_provider import CustomProvider
-
-provider = CustomProvider()
-embeddings = provider.embed(["текст 1", "текст 2"])
-```
-
-### Способ 3: Через настройки
-
-Установите провайдера по умолчанию в `.env`:
+### Способ 3: Через настройки .env
 
 ```bash
-DEFAULT_LLM_PROVIDER=custom
+DEFAULT_LLM_PROVIDER=my_provider
 ```
+
+```python
+# Автоматически использует my_provider из .env
+pipeline = ClusteringPipeline()
+```
+
+---
 
 ## Тестирование
 
-Создайте тестовый файл в `ai_experiments/` для проверки функциональности:
+Создайте тестовый файл в `ai_experiments/`:
 
 ```python
-"""Тест нового провайдера."""
+"""Test custom LLM provider."""
 
-from llm_clustering.llm.factory import get_llm_provider
+from my_llm import MyCustomLLM
+import pandas as pd
 
-def test_custom_provider():
-    """Тест провайдера."""
-    provider = get_llm_provider("custom")
+
+def test_provider():
+    """Простой тест провайдера."""
     
-    # Тест эмбеддингов
-    texts = ["Тестовый текст 1", "Тестовый текст 2"]
-    embeddings = provider.embed(texts)
-    print(f"Embeddings shape: {[len(e) for e in embeddings]}")
+    # Тест chat_completion
+    llm = MyCustomLLM(api_key="xxx")
+    response = llm.chat_completion([
+        {"role": "user", "content": "Привет! Как дела?"}
+    ])
+    print(f"Response: {response}")
     
-    # Тест описания кластера
-    description = provider.describe_cluster(texts)
+    # Тест describe_cluster (автоматически через chat_completion)
+    texts = [
+        "Не могу войти в аккаунт",
+        "Забыл пароль",
+        "Проблема с авторизацией"
+    ]
+    description = llm.describe_cluster(texts)
     print(f"Cluster description: {description}")
+    
+    # Тест в pipeline
+    from llm_clustering import ClusteringPipeline
+    df = pd.DataFrame({"text": texts})
+    pipeline = ClusteringPipeline(llm_provider=llm)
+    result = pipeline.fit(df, text_column="text")
+    print(f"Clusters found: {len(result.clusters)}")
+
 
 if __name__ == "__main__":
-    test_custom_provider()
+    test_provider()
 ```
+
+---
 
 ## Рекомендации
 
-1. **Обработка ошибок**: Всегда обрабатывайте ошибки API и логируйте их с помощью `logger` из `loguru`.
+### ✅ Хорошие практики
 
-2. **Таймауты**: Устанавливайте разумные таймауты для HTTP-запросов (обычно 60 секунд).
+1. **Используйте SimpleLLMProvider** для большинства случаев
+2. **Обрабатывайте ошибки** и логируйте их с помощью `loguru.logger`
+3. **Устанавливайте таймауты** для HTTP-запросов (обычно 60 секунд)
+4. **Валидируйте параметры** в `__init__` (API ключи, URL)
+5. **Добавляйте docstrings** для методов класса
+6. **Используйте типизацию** из `typing`
 
-3. **Валидация**: Проверяйте наличие обязательных параметров (API ключи, URL) в `__init__`.
+### ❌ Частые ошибки
 
-4. **Типизация**: Используйте типы из `typing` для лучшей читаемости и поддержки IDE.
+1. **Не переопределяйте** `describe_cluster()` без необходимости - стандартная реализация отлично работает
+2. **Не реализуйте** `embed()` и `cluster()` если не нужно - они опциональные
+3. **Не забывайте** про обработку ошибок API
+4. **Не храните** секреты в коде - используйте `.env`
 
-5. **Документация**: Добавляйте docstrings для всех методов класса.
-
-6. **Конфигурация**: Выносите все настраиваемые параметры в `Settings` и `.env`.
+---
 
 ## Существующие провайдеры для справки
 
-- `OpenRouterProvider` (`openrouter_provider.py`) - пример REST API провайдера
-- `OllamaProvider` (`ollama_provider.py`) - пример локального провайдера с urllib3
-- `OpenAIProvider` (`openai_provider.py`) - базовая структура (не реализован)
-- `AnthropicProvider` (`anthropic_provider.py`) - базовая структура (не реализован)
+Посмотрите реализации в `src/llm_clustering/llm/`:
 
-Изучите эти файлы для понимания различных подходов к реализации.
+- **`simple_provider.py`** - базовый класс SimpleLLMProvider (⭐ начните с него)
+- **`openrouter_provider.py`** - REST API с requests
+- **`ollama_provider.py`** - локальный провайдер с urllib3
+- **`triton_provider.py`** - Triton Inference Server
 
+---
+
+## FAQ
+
+### Q: Какие методы обязательны?
+
+**A:** Только `chat_completion()` если используете `SimpleLLMProvider`.
+
+### Q: Нужны ли embeddings?
+
+**A:** Нет, метод `embed()` опционален и большинство пайплайнов его не используют.
+
+### Q: Как кастомизировать описание кластеров?
+
+**A:** Переопределите `describe_cluster()` в своём классе (см. Пример 4).
+
+### Q: Что делать если мой LLM API не совместим с OpenAI?
+
+**A:** Просто адаптируйте формат в `chat_completion()` - конвертируйте `messages` в нужный вам формат.
+
+### Q: Можно ли использовать несколько провайдеров одновременно?
+
+**A:** Да, создайте разные инстансы и передавайте их в разные пайплайны.
+
+---
+
+## Заключение
+
+С `SimpleLLMProvider` добавление своего LLM стало **в 4 раза проще**:
+- Раньше: 4 абстрактных метода
+- Теперь: 1 метод (`chat_completion`)
+
+Удачи! 🚀

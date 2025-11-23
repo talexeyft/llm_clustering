@@ -97,3 +97,4 @@ with zipfile.ZipFile('ai_data/demo_sample.csv.zip', 'w', zipfile.ZIP_DEFLATED) a
 
 Для полноценного использования рекомендуется настроить доступ к полному датасету в `~/data/subs/`.
 
+

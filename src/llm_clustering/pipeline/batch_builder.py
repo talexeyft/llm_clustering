@@ -66,7 +66,6 @@ class BatchBuilder:
         text_column: str = "text",
     ) -> None:
         self.settings = settings or get_settings()
-        self.config = self.settings.batch_config
         self.text_column = text_column
         self.batches_dir = Path(self.settings.batches_dir)
         self.batches_dir.mkdir(parents=True, exist_ok=True)
@@ -120,11 +119,12 @@ class BatchBuilder:
             file_stem=f"{resolved_batch_id}_prepared",
         )
 
+        snapshot_info = snapshot.csv.name if snapshot.csv else "not saved"
         logger.info(
             "Prepared batch %s with %d rows (snapshot: %s)",
             resolved_batch_id,
             len(working_df.index),
-            snapshot.csv.name,
+            snapshot_info,
         )
 
         return working_df, resolved_batch_id, snapshot
@@ -134,7 +134,7 @@ class BatchBuilder:
         dataframe: pd.DataFrame,
         batch_id: str,
     ) -> Iterator[BatchSlice]:
-        batch_size = self.config.batch_size
+        batch_size = self.settings.batch_size
         total_rows = len(dataframe.index)
 
         if total_rows == 0:
@@ -152,11 +152,12 @@ class BatchBuilder:
                 file_stem=f"{batch_id}_slice_{slice_idx:04d}",
             )
 
+            snapshot_info = snapshot.csv.name if snapshot.csv else "not saved"
             logger.debug(
                 "Created slice %s with %d rows (snapshot: %s)",
                 slice_id,
                 len(slice_df.index),
-                snapshot.csv.name,
+                snapshot_info,
             )
 
             yield BatchSlice(
@@ -171,6 +172,17 @@ class BatchBuilder:
         dataframe: pd.DataFrame,
         file_stem: str,
     ) -> SnapshotPaths:
+        # Check if we should save based on file_stem
+        is_slice = "_slice_" in file_stem
+        should_save = (
+            (is_slice and self.settings.save_slices) or
+            (not is_slice and self.settings.save_batches)
+        )
+        
+        if not should_save:
+            # Return empty paths without saving
+            return SnapshotPaths(csv=None, parquet=None)
+        
         csv_path = self.batches_dir / f"{file_stem}.csv"
         parquet_path = self.batches_dir / f"{file_stem}.parquet"
 

@@ -26,13 +26,28 @@ class LLMFactory:
     def create(cls, provider: str | None = None, settings: Settings | None = None) -> BaseLLMProvider:
         """Create an LLM provider instance."""
         settings = settings or get_settings()
+        
+        # Explicit provider requested
+        if provider and provider != "auto":
+            logger.info("Using explicitly requested LLM provider: %s", provider)
+            return cls._create_provider(provider, settings)
+        
+        # Resolve provider from settings
         provider_name = cls._resolve_provider(provider, settings)
-
+        logger.info("Selected LLM provider: %s", provider_name)
+        return cls._create_provider(provider_name, settings)
+    
+    @classmethod
+    def _create_provider(cls, provider_name: str, settings: Settings) -> BaseLLMProvider:
+        """Create provider instance with error handling."""
         if provider_name not in cls._providers:
-            raise ValueError(f"Unknown LLM provider: {provider_name}")
+            available = ", ".join(cls._providers.keys())
+            raise ValueError(
+                f"Unknown LLM provider: {provider_name}. Available: {available}"
+            )
 
         provider_class = cls._providers[provider_name]
-        logger.debug("Initializing LLM provider '%s' (model=%s)", provider_name, settings.default_model)
+        logger.debug("Initializing %s with model=%s", provider_name, settings.default_model)
         return provider_class()
 
     @classmethod
@@ -43,24 +58,22 @@ class LLMFactory:
     @classmethod
     def _resolve_provider(cls, provider: str | None, settings: Settings) -> str:
         """Choose the most suitable provider based on settings and preferences."""
-        if provider and provider != "auto":
-            return provider
-
-        llm_cfg = settings.llm_config
-        requested_provider = llm_cfg.provider
-
-        if requested_provider != "auto":
-            return requested_provider
-
-        if llm_cfg.prefer_dual_gpu and "triton" in cls._providers:
-            logger.info("LLM config prefers dual GPU backends; selecting 'triton'.")
+        # Already resolved provider from settings
+        if settings.llm_provider != "auto":
+            return settings.llm_provider
+        
+        # Auto-selection logic with detailed logging
+        if settings.llm_prefer_dual_gpu and "triton" in cls._providers:
+            logger.info("Auto-select: Using 'triton' provider (prefer_dual_gpu=True)")
             return "triton"
-
-        if settings.allow_local_llm_fallback and "ollama" in cls._providers:
-            logger.info("Falling back to local Ollama provider as per settings.")
+        
+        if settings.llm_allow_local_fallback and "ollama" in cls._providers:
+            logger.info("Auto-select: Using 'ollama' provider (allow_local_llm_fallback=True)")
             return "ollama"
-
-        return settings.default_llm_provider
+        
+        fallback = settings.default_llm_provider
+        logger.info("Auto-select: Using default fallback provider '%s'", fallback)
+        return fallback
 
 
 def get_llm_provider(provider: str | None = None) -> BaseLLMProvider:

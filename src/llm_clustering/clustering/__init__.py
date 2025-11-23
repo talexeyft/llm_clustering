@@ -1,17 +1,5 @@
-"""Clustering module."""
+"""Clustering components."""
 
-from llm_clustering.clustering.clusterer import Clusterer
-from llm_clustering.clustering.judge import AssignmentJudge, AssignmentResult
-from llm_clustering.clustering.proposer import ClusterProposer, ProposerResult
-from llm_clustering.clustering.registry import ClusterRecord, ClusterRegistry
+from llm_clustering.clustering.base_llm_component import BaseLLMComponent
 
-__all__ = [
-    "Clusterer",
-    "ClusterRegistry",
-    "ClusterRecord",
-    "ClusterProposer",
-    "ProposerResult",
-    "AssignmentJudge",
-    "AssignmentResult",
-]
-
+__all__ = ["BaseLLMComponent"]

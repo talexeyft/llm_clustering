@@ -37,7 +37,7 @@ class PromptLogger:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
         self.log_dir = Path(self.settings.log_prompt_dir)
-        if self.settings.log_prompts:
+        if self.settings.save_prompts:
             self.log_dir.mkdir(parents=True, exist_ok=True)
 
     def log(
@@ -45,7 +45,7 @@ class PromptLogger:
         entry: PromptLogEntry,
     ) -> Path | None:
         """Persist entry to disk if prompt logging is enabled."""
-        if not self.settings.log_prompts:
+        if not self.settings.save_prompts:
             return None
 
         file_name = f"{entry.prompt_name}_{entry.batch_id}_{uuid4().hex[:6]}.json"
