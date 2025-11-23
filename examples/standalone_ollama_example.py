@@ -53,6 +53,7 @@ CLUSTERING_BATCH_SIZE = 50      # Обрабатывать по 50 обраще�
 MAX_CLUSTERS_PER_BATCH = 10     # Максимум 10 новых кластеров за батч
 MIN_REQUESTS_PER_CLUSTER = 3    # Минимум 3 обращения для кластера
 LLM_TEMPERATURE = 0.1           # Низкая температура для более стабильных результатов
+LLM_MAX_TOKENS = 16000          # Увеличиваем лимит токенов для длинных рассуждений модели
 
 # Настройки Ollama (можно переопределить здесь или брать из .env)
 # Если None, будут использованы значения из .env или дефолтные
@@ -143,11 +144,14 @@ try:
         ollama.model = OLLAMA_MODEL
     if LLM_TEMPERATURE is not None:
         ollama.temperature = LLM_TEMPERATURE
+    if LLM_MAX_TOKENS is not None:
+        ollama.max_tokens = LLM_MAX_TOKENS
         
     print(f"✓ Ollama провайдер инициализирован")
     print(f"  - API URL: {ollama.api_url}")
     print(f"  - Model: {ollama.model}")
     print(f"  - Temperature: {ollama.temperature}")
+    print(f"  - Max Tokens: {ollama.max_tokens}")
     print()
     
     # Проверим доступность Ollama
