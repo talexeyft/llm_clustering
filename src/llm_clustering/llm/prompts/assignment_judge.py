@@ -11,9 +11,14 @@ ASSIGNMENT_JUDGE_TEMPLATE = PromptTemplate(
     name="assignment_judge_v0",
     system=dedent(
         """
+        /nothink
+        
         You decide whether a single contact-center request belongs to one of the
         provided clusters. Answer conservatively, use Russian, and never assign
         when confidence is low.
+        
+        CRITICAL: Do NOT use <think> tags or any reasoning markup. 
+        Reply ONLY with valid JSON, no text before or after.
         """
     ),
     user=dedent(

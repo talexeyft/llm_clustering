@@ -28,5 +28,11 @@ run:
 		echo "Usage: make run INPUT=ai_data/raw_requests.csv [BATCH=batch-2024] [FORMAT=csv]"; \
 		exit 1; \
 	fi
-	PYTHONPATH=src:$$PYTHONPATH python -m llm_clustering --input $(INPUT) --format $${FORMAT:-auto} --batch-id $${BATCH:-} --text-column $${TEXT_COL:-text}
+	FORMAT_FLAG="--format $${FORMAT:-auto}"; \
+	TEXT_FLAG="--text-column $${TEXT_COL:-text}"; \
+	BATCH_FLAG=""; \
+	if [ -n "$${BATCH:-}" ]; then \
+		BATCH_FLAG="--batch-id $$BATCH"; \
+	fi; \
+	PYTHONPATH=src:$$PYTHONPATH python -m llm_clustering --input $(INPUT) $$FORMAT_FLAG $$BATCH_FLAG $$TEXT_FLAG
 

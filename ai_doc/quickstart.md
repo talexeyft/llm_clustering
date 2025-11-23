@@ -186,8 +186,38 @@ descriptions = clusterer.describe_clusters(clustered)
 ## Запуск тестов
 
 ```bash
-pytest
+PYTHONPATH=src:$PYTHONPATH pytest
 ```
+
+## Запуск на тестовых данных через Ollama
+
+```bash
+# Убедитесь, что Ollama запущен
+ollama serve
+
+# Запуск на 20 записях (быстрый тест)
+source venv/bin/activate
+export $(cat .env | grep -v '^#' | grep -v '^$' | xargs)
+PYTHONPATH=src:$PYTHONPATH python -m llm_clustering.main \
+  --input ai_data/subs_sample_20.parquet \
+  --batch-id test_quick
+
+# Запуск на 100 записях (батчи по 20)
+PYTHONPATH=src:$PYTHONPATH python -m llm_clustering.main \
+  --input ai_data/subs_sample_100.parquet \
+  --batch-id test_100
+
+# Результаты на 100 записях:
+# - Coverage: 74% (74 из 100 назначено)
+# - Время: ~8.5 минут
+# - Основной кластер: dropped_calls_network_issues (50 запросов)
+# - Детали: ai_data/ИТОГОВАЯ_СВОДКА_100_ЗАПРОСОВ.md
+```
+
+**Рекомендуемые модели для Ollama:**
+- `qwen3:30b-a3b` (30B MoE) - быстрая, 100% стабильность после улучшений парсера ✅
+- `gemma3:latest` (4B) - быстрая, хорошо работает с JSON
+- `qwen3:32b` - более качественные результаты, но медленнее
 
 ## Тестирование Ollama
 
@@ -199,6 +229,27 @@ PYTHONPATH=src:$PYTHONPATH python ai_experiments/test_ollama_success.py
 ```
 
 **Примечание**: Провайдер Ollama использует `urllib3` вместо `requests` из-за проблем совместимости с Ollama сервером.
+
+## Просмотр результатов
+
+После запуска можно посмотреть результаты:
+
+```bash
+# Результаты кластеризации (CSV)
+cat ai_data/results/test_100_detailed.csv | head -20
+
+# Cohesion отчет
+cat ai_data/reports/test_100_detailed_cohesion.txt
+
+# Метрики
+tail -10 ai_data/metrics.csv
+
+# Реестр кластеров (JSON)
+cat ai_data/cluster_registry.json | jq '.clusters[] | {cluster_id, name, count}'
+
+# Детальный анализ (если есть)
+cat ai_data/ИТОГОВАЯ_СВОДКА_100_ЗАПРОСОВ.md
+```
 
 ## Тестирование OpenRouter
 

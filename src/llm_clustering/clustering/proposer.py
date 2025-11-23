@@ -126,10 +126,13 @@ class ClusterProposer:
 
     @staticmethod
     def _parse_response(response_text: str, batch_id: str) -> dict[str, Any]:
+        from llm_clustering.clustering.utils import extract_json_from_response
+        
         try:
-            payload = json.loads(response_text)
+            payload = extract_json_from_response(response_text)
         except json.JSONDecodeError as err:
             logger.error("Failed to parse proposer response for %s: %s", batch_id, err)
+            logger.error("Original response: %s", response_text[:500])
             raise ValueError("LLM proposer returned invalid JSON.") from err
 
         if not isinstance(payload, dict):
@@ -170,7 +173,14 @@ class ClusterProposer:
             sample_request_ids = []
 
         summary = str(payload.get("summary") or "").strip()
-        criteria = str(payload.get("criteria") or "").strip()
+        
+        # criteria может быть строкой или списком
+        criteria_raw = payload.get("criteria")
+        if isinstance(criteria_raw, list):
+            criteria = "\n".join(f"- {item}" for item in criteria_raw if item)
+        else:
+            criteria = str(criteria_raw or "").strip()
+        
         llm_reasoning = str(payload.get("llm_reasoning") or "").strip()
         name = str(payload.get("name") or cluster_id).strip()
 

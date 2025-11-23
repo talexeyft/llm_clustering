@@ -45,7 +45,10 @@ class CohesionChecker:
 
         prompt = self._render_prompt(batch_id, summary)
         messages = [
-            {"role": "system", "content": "Ты аналитик качества. Ответь на русском."},
+            {
+                "role": "system",
+                "content": "/nothink\n\nТы аналитик качества. Ответь на русском.\n\nCRITICAL: Do NOT use <think> tags or any reasoning markup. Reply ONLY with valid JSON, no text before or after.",
+            },
             {"role": "user", "content": prompt},
         ]
 

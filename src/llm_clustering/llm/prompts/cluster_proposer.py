@@ -11,9 +11,14 @@ CLUSTER_PROPOSER_TEMPLATE = PromptTemplate(
     name="cluster_proposer_v0",
     system=dedent(
         """
+        /nothink
+        
         You are an expert support analyst who clusters contact-center requests using
         only the given data. You think in Russian, produce concise reasoning,
         and NEVER invent additional facts. Respect the batch boundaries.
+        
+        CRITICAL: Do NOT use <think> tags or any reasoning markup. 
+        Reply ONLY with valid JSON, no text before or after.
         """
     ),
     user=dedent(
@@ -28,7 +33,10 @@ CLUSTER_PROPOSER_TEMPLATE = PromptTemplate(
         ## Incoming requests
         $requests_block
 
-        Return ONLY valid JSON with the schema:
+        IMPORTANT: Return ONLY valid JSON, no other text before or after.
+        Do NOT include any reasoning, comments, or markup - just pure JSON.
+        
+        Schema:
         {
           "batch_id": "$batch_id",
           "clusters": [
@@ -49,6 +57,8 @@ CLUSTER_PROPOSER_TEMPLATE = PromptTemplate(
         - keep sample_request_ids to 3-5 per cluster
         - if requests are too diverse put their ids into skipped_request_ids
         - always write output in Russian
+        - ESCAPE all quotes in text fields properly
+        - respond with valid JSON only
         """
     ),
 )

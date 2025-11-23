@@ -75,11 +75,13 @@ class AssignmentJudge:
             latency_ms = latency * 1000
 
             try:
-                response_payload = json.loads(response_text)
+                from llm_clustering.clustering.utils import extract_json_from_response
+                response_payload = extract_json_from_response(response_text)
                 if not isinstance(response_payload, dict):
                     raise ValueError("Judge response must be a JSON object.")
             except json.JSONDecodeError as err:
                 logger.error("Judge returned invalid JSON for %s: %s", record.get("request_id"), err)
+                logger.error("Original response: %s", response_text[:500])
                 results.append(
                     AssignmentResult(
                         batch_id=batch_slice.batch_id,
