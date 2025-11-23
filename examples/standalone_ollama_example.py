@@ -1,54 +1,82 @@
 #!/usr/bin/env python3
 """
 Пример самостоятельного запуска библиотеки llm_clustering с Ollama.
+Стиль "Python Notebook" - линейное исполнение без функции main.
 
 Этот скрипт демонстрирует:
 1. Использование Ollama в качестве LLM-провайдера
-2. Кластеризацию 1000 обращений из демо-данных
+2. Кластеризацию обращений из демо-данных
 3. Применение кастомного промпта через business_context
 
 Требования:
 - Запущенный Ollama: ollama serve
-- Установленная модель: ollama pull qwen3:30b (или другая)
+- Установленная модель: ollama pull qwen3:30b-a3b (или другая)
 - Установленная библиотека: pip install -e .
-
-Использование:
-    python ai_experiments/standalone_ollama_example.py
 """
 
 import sys
+import os
 from pathlib import Path
 from datetime import datetime
-
+import traceback
 import pandas as pd
 
-# Добавляем src в путь для импорта
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root / "src"))
+# =========================================================================
+# НАСТРОЙКА ОКРУЖЕНИЯ
+# =========================================================================
+
+# Определяем корневую директорию проекта
+try:
+    # Если запускаем как скрипт
+    PROJECT_ROOT = Path(__file__).parent.parent
+except NameError:
+    # Если запускаем в Jupyter Notebook
+    PROJECT_ROOT = Path(os.getcwd())
+
+# Добавляем src в путь для импорта, если его там нет
+if str(PROJECT_ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from llm_clustering import ClusteringPipeline, Settings
 from llm_clustering.llm import OllamaProvider
 
+# =========================================================================
+# ПАРАМЕТРЫ ЗАПУСКА (НАСТРОЙКИ)
+# =========================================================================
 
-def load_demo_data(limit: int = 1000) -> pd.DataFrame:
-    """Загрузить демо-данные из CSV.
-    
-    Args:
-        limit: Количество записей для загрузки (по умолчанию 1000)
-        
-    Returns:
-        DataFrame с обращениями
-    """
-    demo_file = project_root / "ai_data" / "demo_sample.csv"
-    
-    if not demo_file.exists():
+# Данные
+DEMO_FILE_PATH = PROJECT_ROOT / "ai_data" / "demo_sample.csv"
+LIMIT_ROWS = 1000  # Сколько строк загружать
+
+# Настройки кластеризации
+CLUSTERING_BATCH_SIZE = 50      # Обрабатывать по 50 обращений за раз
+MAX_CLUSTERS_PER_BATCH = 10     # Максимум 10 новых кластеров за батч
+MIN_REQUESTS_PER_CLUSTER = 3    # Минимум 3 обращения для кластера
+LLM_TEMPERATURE = 0.1           # Низкая температура для более стабильных результатов
+
+# Настройки Ollama (можно переопределить здесь или брать из .env)
+# Если None, будут использованы значения из .env или дефолтные
+OLLAMA_URL = None   # Например: "http://localhost:11434/api"
+OLLAMA_MODEL = None # Например: "qwen3:30b-a3b"
+
+# Директория для результатов
+OUTPUT_DIR = PROJECT_ROOT / "ai_data" / "standalone_example_results"
+
+
+# =========================================================================
+# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# =========================================================================
+
+def load_demo_data(path: Path, limit: int = 1000) -> pd.DataFrame:
+    """Загрузить демо-данные из CSV."""
+    if not path.exists():
         raise FileNotFoundError(
-            f"Демо-файл не найден: {demo_file}\n"
+            f"Демо-файл не найден: {path}\n"
             "Убедитесь, что файл ai_data/demo_sample.csv существует."
         )
     
-    print(f"Загрузка данных из {demo_file}...")
-    df = pd.read_csv(demo_file)
+    print(f"Загрузка данных из {path}...")
+    df = pd.read_csv(path)
     
     # Ограничиваем количество записей
     if len(df) > limit:
@@ -57,13 +85,8 @@ def load_demo_data(limit: int = 1000) -> pd.DataFrame:
     print(f"✓ Загружено {len(df)} обращений")
     return df
 
-
 def create_custom_business_context() -> str:
-    """Создать кастомный промпт для кластеризации.
-    
-    Returns:
-        Строка с бизнес-контекстом
-    """
+    """Создать кастомный промпт для кластеризации."""
     return """
     ## Контекст задачи
     Ты анализируешь обращения клиентов в службу поддержки телеком-оператора Union Mobile.
@@ -92,249 +115,241 @@ def create_custom_business_context() -> str:
     Например: "Проблемы с подключением к интернету", "Вопросы по тарифам", "Жалобы на качество связи".
     """
 
+# =========================================================================
+# ОСНОВНОЙ КОД (EXECUTION FLOW)
+# =========================================================================
 
-def main():
-    """Основная функция для запуска примера."""
+print("=" * 80)
+print("STANDALONE ПРИМЕР: Кластеризация с Ollama (Notebook Style)")
+print("=" * 80)
+print()
+
+# -------------------------------------------------------------------------
+# ШАГ 1: Настройка Ollama провайдера
+# -------------------------------------------------------------------------
+print("Шаг 1: Инициализация Ollama провайдера")
+print("-" * 80)
+
+try:
+    # Создаем провайдер Ollama
+    # Примечание: класс OllamaProvider инициализируется из глобальных настроек (.env),
+    # поэтому мы переопределяем параметры вручную после создания объекта,
+    # чтобы использовать значения из переменных скрипта.
+    ollama = OllamaProvider()
     
-    print("=" * 80)
-    print("STANDALONE ПРИМЕР: Кластеризация с Ollama")
-    print("=" * 80)
+    if OLLAMA_URL:
+        ollama.api_url = OLLAMA_URL
+    if OLLAMA_MODEL:
+        ollama.model = OLLAMA_MODEL
+    if LLM_TEMPERATURE is not None:
+        ollama.temperature = LLM_TEMPERATURE
+        
+    print(f"✓ Ollama провайдер инициализирован")
+    print(f"  - API URL: {ollama.api_url}")
+    print(f"  - Model: {ollama.model}")
+    print(f"  - Temperature: {ollama.temperature}")
     print()
     
-    # =========================================================================
-    # ШАГ 1: Настройка Ollama провайдера
-    # =========================================================================
-    print("Шаг 1: Инициализация Ollama провайдера")
-    print("-" * 80)
-    
-    try:
-        # Создаем провайдер Ollama
-        # По умолчанию использует настройки из .env или значения по умолчанию:
-        # - OLLAMA_API_URL=http://localhost:11434/api
-        # - OLLAMA_MODEL=qwen3:30b
-        ollama = OllamaProvider()
-        
-        print(f"✓ Ollama провайдер инициализирован")
-        print(f"  - API URL: {ollama.api_url}")
-        print(f"  - Model: {ollama.model}")
-        print(f"  - Temperature: {ollama.temperature}")
-        print()
-        
-        # Проверим доступность Ollama
-        test_response = ollama.chat_completion(
-            messages=[{"role": "user", "content": "Скажи 'OK'"}],
-            temperature=0.0,
-            max_tokens=10
-        )
-        print(f"✓ Ollama отвечает: {test_response.strip()}")
-        print()
-        
-    except Exception as e:
-        print(f"✗ Ошибка подключения к Ollama: {e}")
-        print()
-        print("Убедитесь что:")
-        print("  1. Ollama запущена: ollama serve")
-        print("  2. Модель установлена: ollama pull qwen3:30b")
-        print("  3. URL правильный в .env: OLLAMA_API_URL=http://localhost:11434/api")
-        return 1
-    
-    # =========================================================================
-    # ШАГ 2: Загрузка данных
-    # =========================================================================
-    print("\nШаг 2: Загрузка демо-данных")
-    print("-" * 80)
-    
-    try:
-        df = load_demo_data(limit=1000)
-        print()
-        print("Первые несколько обращений:")
-        print(df[["text", "request_id"]].head(3))
-        print()
-        
-    except Exception as e:
-        print(f"✗ Ошибка загрузки данных: {e}")
-        return 1
-    
-    # =========================================================================
-    # ШАГ 3: Создание кастомного промпта
-    # =========================================================================
-    print("\nШаг 3: Создание кастомного бизнес-контекста")
-    print("-" * 80)
-    
-    business_context = create_custom_business_context()
-    print("✓ Бизнес-контекст создан")
-    print("\nФрагмент контекста:")
-    print(business_context[:300] + "...")
-    print()
-    
-    # =========================================================================
-    # ШАГ 4: Настройка pipeline
-    # =========================================================================
-    print("\nШаг 4: Настройка pipeline кластеризации")
-    print("-" * 80)
-    
-    # Создаем настройки для pipeline
-    settings = Settings(
-        clustering_batch_size=50,      # Обрабатывать по 50 обращений за раз
-        max_clusters_per_batch=10,     # Максимум 10 новых кластеров за батч
-        min_requests_per_cluster=3,    # Минимум 3 обращения для кластера
-        default_temperature=0.1,       # Низкая температура для более стабильных результатов
+    # Проверим доступность Ollama
+    print("Проверка соединения с Ollama...")
+    test_response = ollama.chat_completion(
+        messages=[{"role": "user", "content": "Скажи 'OK'"}],
+        temperature=0.0,
+        max_tokens=10
     )
-    
-    # Создаем pipeline с Ollama и бизнес-контекстом
-    pipeline = ClusteringPipeline(
-        llm_provider=ollama,
-        business_context=business_context,
-        settings=settings
-    )
-    
-    print("✓ Pipeline настроен")
-    print(f"  - Размер батча: {settings.clustering_batch_size}")
-    print(f"  - Макс. кластеров за батч: {settings.max_clusters_per_batch}")
-    print(f"  - Мин. обращений в кластере: {settings.min_requests_per_cluster}")
+    print(f"✓ Ollama отвечает: {test_response.strip()}")
     print()
     
-    # =========================================================================
-    # ШАГ 5: Запуск кластеризации
-    # =========================================================================
-    print("\nШаг 5: Запуск кластеризации")
-    print("-" * 80)
-    print(f"Обрабатываем {len(df)} обращений...")
-    print("(Это может занять несколько минут)")
+except Exception as e:
+    print(f"✗ Ошибка подключения к Ollama: {e}")
+    print()
+    print("Убедитесь что:")
+    print("  1. Ollama запущена: ollama serve")
+    print("  2. Модель установлена: ollama pull qwen3:30b-a3b")
+    print("  3. URL правильный в .env или в параметрах скрипта")
+    sys.exit(1)
+
+# -------------------------------------------------------------------------
+# ШАГ 2: Загрузка данных
+# -------------------------------------------------------------------------
+print("\nШаг 2: Загрузка демо-данных")
+print("-" * 80)
+
+try:
+    df = load_demo_data(DEMO_FILE_PATH, limit=LIMIT_ROWS)
+    print()
+    print("Первые несколько обращений:")
+    print(df[["text", "request_id"]].head(3))
     print()
     
-    start_time = datetime.now()
-    
-    try:
-        # Итеративная обработка с отслеживанием прогресса
-        batch_count = 0
-        for partial_result in pipeline.fit_partial(
-            df,
-            text_column="text",
-            batch_size=settings.clustering_batch_size
-        ):
-            batch_count += 1
-            progress = (partial_result.processed_rows / partial_result.total_rows) * 100
-            
-            print(f"Батч {batch_count}:")
-            print(f"  ├─ Обработано: {partial_result.processed_rows}/{partial_result.total_rows} ({progress:.1f}%)")
-            print(f"  ├─ Новых кластеров: {len(partial_result.new_clusters)}")
-            print(f"  └─ Всего кластеров: {len(pipeline.get_clusters())}")
-            
-            if partial_result.new_clusters:
-                for cluster in partial_result.new_clusters[:3]:  # Показываем первые 3
-                    print(f"      • {cluster.name}")
-            print()
+except Exception as e:
+    print(f"✗ Ошибка загрузки данных: {e}")
+    sys.exit(1)
+
+# -------------------------------------------------------------------------
+# ШАГ 3: Создание кастомного промпта
+# -------------------------------------------------------------------------
+print("\nШаг 3: Создание кастомного бизнес-контекста")
+print("-" * 80)
+
+business_context = create_custom_business_context()
+print("✓ Бизнес-контекст создан")
+print("\nФрагмент контекста:")
+print(business_context[:300] + "...")
+print()
+
+# -------------------------------------------------------------------------
+# ШАГ 4: Настройка pipeline
+# -------------------------------------------------------------------------
+print("\nШаг 4: Настройка pipeline кластеризации")
+print("-" * 80)
+
+# Создаем настройки для pipeline
+settings = Settings(
+    clustering_batch_size=CLUSTERING_BATCH_SIZE,
+    max_clusters_per_batch=MAX_CLUSTERS_PER_BATCH,
+    min_requests_per_cluster=MIN_REQUESTS_PER_CLUSTER,
+    default_temperature=LLM_TEMPERATURE,
+)
+
+# Создаем pipeline с Ollama и бизнес-контекстом
+pipeline = ClusteringPipeline(
+    llm_provider=ollama,
+    business_context=business_context,
+    settings=settings
+)
+
+print("✓ Pipeline настроен")
+print(f"  - Размер батча: {settings.clustering_batch_size}")
+print(f"  - Макс. кластеров за батч: {settings.max_clusters_per_batch}")
+print(f"  - Мин. обращений в кластере: {settings.min_requests_per_cluster}")
+print()
+
+# -------------------------------------------------------------------------
+# ШАГ 5: Запуск кластеризации
+# -------------------------------------------------------------------------
+print("\nШаг 5: Запуск кластеризации")
+print("-" * 80)
+print(f"Обрабатываем {len(df)} обращений...")
+print("(Это может занять несколько минут)")
+print()
+
+start_time = datetime.now()
+
+try:
+    # Итеративная обработка с отслеживанием прогресса
+    batch_count = 0
+    for partial_result in pipeline.fit_partial(
+        df,
+        text_column="text",
+        batch_size=settings.clustering_batch_size
+    ):
+        batch_count += 1
+        progress = (partial_result.processed_rows / partial_result.total_rows) * 100
         
-        elapsed = (datetime.now() - start_time).total_seconds()
-        print(f"✓ Кластеризация завершена за {elapsed:.1f} секунд")
+        print(f"Батч {batch_count}:")
+        print(f"  ├─ Обработано: {partial_result.processed_rows}/{partial_result.total_rows} ({progress:.1f}%)")
+        print(f"  ├─ Новых кластеров: {len(partial_result.new_clusters)}")
+        print(f"  └─ Всего кластеров: {len(pipeline.get_clusters())}")
+        
+        if partial_result.new_clusters:
+            for cluster in partial_result.new_clusters[:3]:  # Показываем первые 3
+                print(f"      • {cluster.name}")
         print()
-        
-    except Exception as e:
-        print(f"✗ Ошибка при кластеризации: {e}")
-        import traceback
-        traceback.print_exc()
-        return 1
     
-    # =========================================================================
-    # ШАГ 6: Анализ результатов
-    # =========================================================================
-    print("\nШаг 6: Анализ результатов")
-    print("-" * 80)
-    
-    # Получаем финальные результаты
-    clusters = pipeline.get_clusters()
-    
-    print(f"\n📊 ИТОГОВАЯ СТАТИСТИКА:")
-    print(f"  • Всего обращений: {len(df)}")
-    print(f"  • Найдено кластеров: {len(clusters)}")
-    print(f"  • Среднее обращений на кластер: {len(df) / len(clusters) if clusters else 0:.1f}")
+    elapsed = (datetime.now() - start_time).total_seconds()
+    print(f"✓ Кластеризация завершена за {elapsed:.1f} секунд")
     print()
     
-    # Топ-10 кластеров по размеру
-    print("🏆 ТОП-10 КЛАСТЕРОВ ПО КОЛИЧЕСТВУ ОБРАЩЕНИЙ:")
-    print()
-    
-    sorted_clusters = sorted(clusters, key=lambda c: c.count, reverse=True)
-    for i, cluster in enumerate(sorted_clusters[:10], 1):
-        print(f"{i:2d}. {cluster.name}")
-        print(f"    • Обращений: {cluster.count}")
-        print(f"    • Описание: {cluster.summary[:100]}...")
-        print()
-    
-    # =========================================================================
-    # ШАГ 7: Сохранение результатов
-    # =========================================================================
-    print("\nШаг 7: Сохранение результатов")
-    print("-" * 80)
-    
-    output_dir = project_root / "ai_data" / "standalone_example_results"
-    output_dir.mkdir(exist_ok=True)
-    
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    
-    # Сохраняем кластеры
-    clusters_file = output_dir / f"clusters_{timestamp}.json"
-    pipeline.save_clusters(clusters_file)
-    print(f"✓ Кластеры сохранены: {clusters_file}")
-    
-    # Сохраняем assignments (результат последнего батча)
-    # Для полных результатов нужно собрать все partial_result.assignments
-    assignments_file = output_dir / f"assignments_{timestamp}.csv"
-    
-    # Получаем все назначения через refit (это даст нам assignments для всех данных)
-    full_result = pipeline.fit(df, text_column="text")
-    full_result.assignments.to_csv(assignments_file, index=False)
-    print(f"✓ Назначения сохранены: {assignments_file}")
-    
-    # Создаем краткий отчет
-    report_file = output_dir / f"report_{timestamp}.txt"
-    with open(report_file, "w", encoding="utf-8") as f:
-        f.write("=" * 80 + "\n")
-        f.write("ОТЧЕТ ПО КЛАСТЕРИЗАЦИИ\n")
-        f.write("=" * 80 + "\n\n")
-        f.write(f"Дата: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write(f"Модель: {ollama.model}\n")
-        f.write(f"Обработано обращений: {len(df)}\n")
-        f.write(f"Найдено кластеров: {len(clusters)}\n")
-        f.write(f"Покрытие: {full_result.coverage:.1f}%\n")
-        f.write(f"Время обработки: {elapsed:.1f} сек\n\n")
-        
-        f.write("КЛАСТЕРЫ (отсортированы по размеру):\n")
-        f.write("-" * 80 + "\n\n")
-        
-        for i, cluster in enumerate(sorted_clusters, 1):
-            f.write(f"{i}. {cluster.name}\n")
-            f.write(f"   ID: {cluster.cluster_id}\n")
-            f.write(f"   Обращений: {cluster.count}\n")
-            f.write(f"   Описание: {cluster.summary}\n")
-            f.write(f"   Критерии: {cluster.criteria}\n")
-            f.write(f"   Примеры: {', '.join(cluster.sample_requests[:3])}\n")
-            f.write("\n")
-    
-    print(f"✓ Отчет сохранен: {report_file}")
-    print()
-    
-    # =========================================================================
-    # ЗАВЕРШЕНИЕ
-    # =========================================================================
-    print("=" * 80)
-    print("✅ ПРИМЕР УСПЕШНО ЗАВЕРШЕН!")
-    print("=" * 80)
-    print()
-    print("Результаты сохранены в:")
-    print(f"  {output_dir}/")
-    print()
-    print("Следующие шаги:")
-    print("  1. Изучите отчет для анализа найденных кластеров")
-    print("  2. Проверьте assignments для детальной разметки")
-    print("  3. Используйте сохраненные кластеры для новых данных")
-    print("  4. Настройте business_context под вашу задачу")
-    print()
-    
-    return 0
+except Exception as e:
+    print(f"✗ Ошибка при кластеризации: {e}")
+    traceback.print_exc()
+    sys.exit(1)
 
+# -------------------------------------------------------------------------
+# ШАГ 6: Анализ результатов
+# -------------------------------------------------------------------------
+print("\nШаг 6: Анализ результатов")
+print("-" * 80)
 
-if __name__ == "__main__":
-    sys.exit(main())
+# Получаем финальные результаты
+clusters = pipeline.get_clusters()
 
+print(f"\n📊 ИТОГОВАЯ СТАТИСТИКА:")
+print(f"  • Всего обращений: {len(df)}")
+print(f"  • Найдено кластеров: {len(clusters)}")
+print(f"  • Среднее обращений на кластер: {len(df) / len(clusters) if clusters else 0:.1f}")
+print()
+
+# Топ-10 кластеров по размеру
+print("🏆 ТОП-10 КЛАСТЕРОВ ПО КОЛИЧЕСТВУ ОБРАЩЕНИЙ:")
+print()
+
+sorted_clusters = sorted(clusters, key=lambda c: c.count, reverse=True)
+for i, cluster in enumerate(sorted_clusters[:10], 1):
+    print(f"{i:2d}. {cluster.name}")
+    print(f"    • Обращений: {cluster.count}")
+    print(f"    • Описание: {cluster.summary[:100]}...")
+    print()
+
+# -------------------------------------------------------------------------
+# ШАГ 7: Сохранение результатов
+# -------------------------------------------------------------------------
+print("\nШаг 7: Сохранение результатов")
+print("-" * 80)
+
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+# Сохраняем кластеры
+clusters_file = OUTPUT_DIR / f"clusters_{timestamp}.json"
+pipeline.save_clusters(clusters_file)
+print(f"✓ Кластеры сохранены: {clusters_file}")
+
+# Сохраняем assignments (результат последнего батча)
+# Для полных результатов нужно собрать все partial_result.assignments
+assignments_file = OUTPUT_DIR / f"assignments_{timestamp}.csv"
+
+# Получаем все назначения через refit (это даст нам assignments для всех данных)
+print("Генерация полных назначений...")
+full_result = pipeline.fit(df, text_column="text")
+full_result.assignments.to_csv(assignments_file, index=False)
+print(f"✓ Назначения сохранены: {assignments_file}")
+
+# Создаем краткий отчет
+report_file = OUTPUT_DIR / f"report_{timestamp}.txt"
+with open(report_file, "w", encoding="utf-8") as f:
+    f.write("=" * 80 + "\n")
+    f.write("ОТЧЕТ ПО КЛАСТЕРИЗАЦИИ\n")
+    f.write("=" * 80 + "\n\n")
+    f.write(f"Дата: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+    f.write(f"Модель: {ollama.model}\n")
+    f.write(f"Обработано обращений: {len(df)}\n")
+    f.write(f"Найдено кластеров: {len(clusters)}\n")
+    f.write(f"Покрытие: {full_result.coverage:.1f}%\n")
+    f.write(f"Время обработки: {elapsed:.1f} сек\n\n")
+    
+    f.write("КЛАСТЕРЫ (отсортированы по размеру):\n")
+    f.write("-" * 80 + "\n\n")
+    
+    for i, cluster in enumerate(sorted_clusters, 1):
+        f.write(f"{i}. {cluster.name}\n")
+        f.write(f"   ID: {cluster.cluster_id}\n")
+        f.write(f"   Обращений: {cluster.count}\n")
+        f.write(f"   Описание: {cluster.summary}\n")
+        f.write(f"   Критерии: {cluster.criteria}\n")
+        f.write(f"   Примеры: {', '.join(cluster.sample_requests[:3])}\n")
+        f.write("\n")
+
+print(f"✓ Отчет сохранен: {report_file}")
+print()
+
+# =========================================================================
+# ЗАВЕРШЕНИЕ
+# =========================================================================
+print("=" * 80)
+print("✅ ПРИМЕР УСПЕШНО ЗАВЕРШЕН!")
+print("=" * 80)
+print("Результаты сохранены в:")
+print(f"  {OUTPUT_DIR}/")

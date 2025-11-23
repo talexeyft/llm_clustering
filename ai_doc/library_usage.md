@@ -138,7 +138,7 @@ settings = Settings(
     max_clusters_per_batch=5,
     default_temperature=0.1,
     default_llm_provider="ollama",
-    ollama_model="qwen3:30b",
+    ollama_model="qwen3:30b-a3b",
 )
 
 pipeline = ClusteringPipeline(settings=settings)
@@ -225,7 +225,7 @@ for cluster in clusters:
 ```python
 settings = Settings(
     default_llm_provider="ollama",
-    ollama_model="qwen3:30b",
+    ollama_model="qwen3:30b-a3b",
     ollama_api_url="http://localhost:11434/api",
     default_temperature=0.0,
     default_max_tokens=4096,
@@ -238,7 +238,7 @@ pipeline = ClusteringPipeline(settings=settings)
 
 ```bash
 DEFAULT_LLM_PROVIDER=ollama
-OLLAMA_MODEL=qwen3:30b
+OLLAMA_MODEL=qwen3:30b-a3b
 OLLAMA_API_URL=http://localhost:11434/api
 DEFAULT_TEMPERATURE=0.0
 DEFAULT_MAX_TOKENS=4096

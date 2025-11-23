@@ -16,7 +16,7 @@
    $ ollama serve
 
 2️⃣  Убедитесь что модель установлена:
-   $ ollama pull qwen3:30b
+   $ ollama pull qwen3:30b-a3b
 
 3️⃣  Запустите пример:
    $ source venv/bin/activate
@@ -48,7 +48,7 @@
 
 ✓ Python 3.10+
 ✓ Ollama установлена и запущена
-✓ Модель qwen3:30b скачана
+✓ Модель qwen3:30b-a3b скачана
 ✓ Библиотека установлена: pip install -e .
 ✓ Демо-данные распакованы: ai_data/demo_sample.csv
 

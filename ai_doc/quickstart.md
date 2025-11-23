@@ -43,8 +43,8 @@ cp env.example .env
 # Убедитесь, что Ollama установлена и доступна локально
 ```
 
-По умолчанию проект настроен на использование локальной Ollama с моделью `qwen3:30b`.
-Перед запуском выполните `ollama serve` и `ollama pull qwen3:30b`.
+По умолчанию проект настроен на использование локальной Ollama с моделью `qwen3:30b-a3b`.
+Перед запуском выполните `ollama serve` и `ollama pull qwen3:30b-a3b`.
 
 ### Обязательные переменные окружения
 
@@ -114,12 +114,12 @@ INPUT=ai_data/support.csv BATCH=batch-20241121 TEXT_COL=message make run
    ```
 2. Убедитесь, что модель скачана:
    ```bash
-   ollama pull qwen3:30b
+   ollama pull qwen3:30b-a3b
    ```
 3. В `.env` уже выставлены:
    ```
    DEFAULT_LLM_PROVIDER=ollama
-   OLLAMA_MODEL=qwen3:30b
+   OLLAMA_MODEL=qwen3:30b-a3b
    ```
 
 ### Использование Triton провайдера
@@ -355,7 +355,7 @@ settings = Settings(
     max_clusters_per_batch=5,
     default_temperature=0.1,
     default_llm_provider="ollama",
-    ollama_model="qwen3:30b",
+    ollama_model="qwen3:30b-a3b",
 )
 
 # Инициализация с настройками
@@ -408,7 +408,7 @@ PYTHONPATH=src:$PYTHONPATH python -m llm_clustering.main \
 ```
 
 **Рекомендуемые модели для Ollama:**
-- `qwen3:30b-a3b` (30B MoE) - быстрая, 100% стабильность после улучшений парсера ✅
+- `qwen3:30b-a3b-a3b` (30B MoE) - быстрая, 100% стабильность после улучшений парсера ✅
 - `gemma3:latest` (4B) - быстрая, хорошо работает с JSON
 - `qwen3:32b` - более качественные результаты, но медленнее
 

@@ -16,7 +16,7 @@ class Settings(BaseSettings):
 
     # LLM Configuration
     llm_provider: str = "ollama"
-    llm_model: str = "qwen3:30b"
+    llm_model: str = "dengcao/Qwen3-30B-A3B-Instruct-2507"
     llm_temperature: float = 0.0
     llm_max_tokens: int = 4096
     llm_prefer_dual_gpu: bool = True
@@ -24,7 +24,7 @@ class Settings(BaseSettings):
 
     # Legacy LLM fields for compatibility
     default_llm_provider: str = "ollama"
-    default_model: str = "qwen3:30b"
+    default_model: str = "dengcao/Qwen3-30B-A3B-Instruct-2507"
     default_temperature: float = 0.0
     default_max_tokens: int = 4096
     prefer_dual_gpu: bool = True
@@ -35,7 +35,7 @@ class Settings(BaseSettings):
 
     # Ollama specific (local)
     ollama_api_url: str = "http://localhost:11434/api"
-    ollama_model: str = "qwen3:30b"
+    ollama_model: str = "dengcao/Qwen3-30B-A3B-Instruct-2507"
 
     # Triton specific (local)
     triton_api_url: str = "http://localhost:8000"

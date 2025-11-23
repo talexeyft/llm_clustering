@@ -20,7 +20,7 @@ class OllamaProvider(BaseLLMProvider):
         """Initialize Ollama provider."""
         settings = get_settings()
         self.api_url = settings.ollama_api_url
-        self.model = settings.ollama_model or "qwen3:30b"
+        self.model = settings.ollama_model or "dengcao/Qwen3-30B-A3B-Instruct-2507"
         self.temperature = settings.default_temperature
         self.max_tokens = settings.default_max_tokens
 

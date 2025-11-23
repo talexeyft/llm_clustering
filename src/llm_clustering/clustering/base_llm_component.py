@@ -81,8 +81,9 @@ class BaseLLMComponent:
         try:
             payload = extract_json_from_response(response_text)
         except json.JSONDecodeError as err:
-            logger.error("Failed to parse %s response: %s", error_context, err)
-            logger.error("Original response: %s", response_text[:500])
+            logger.error(f"Failed to parse {error_context} response: {err}")
+            logger.error(f"Original response: {response_text[:1000]}")
+            print(f"\n!!! JSON PARSE ERROR [{error_context}] !!!\nRAW RESPONSE:\n{response_text}\n!!! END RAW RESPONSE !!!\n")
             raise ValueError(f"LLM {error_context} returned invalid JSON.") from err
 
         if not isinstance(payload, dict):

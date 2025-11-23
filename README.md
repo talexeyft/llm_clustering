@@ -51,7 +51,7 @@ pip install -e ".[dev]"
 cp env.example .env
 ```
 
-**По умолчанию**: Проект настроен на использование **Ollama** с моделью **`qwen3:30b`**.
+**По умолчанию**: Проект настроен на использование **Ollama** с моделью **`qwen3:30b-a3b`**.
 
 ### Настройка Ollama (по умолчанию)
 
@@ -60,11 +60,11 @@ cp env.example .env
 ollama serve
 
 # Скачать модель
-ollama pull qwen3:30b
+ollama pull qwen3:30b-a3b
 
 # В .env убедитесь что:
 DEFAULT_LLM_PROVIDER=ollama
-OLLAMA_MODEL=qwen3:30b
+OLLAMA_MODEL=qwen3:30b-a3b
 OLLAMA_API_URL=http://localhost:11434/api
 ```
 
@@ -157,14 +157,14 @@ from llm_clustering import ClusteringPipeline, Settings
 # Через Settings
 settings = Settings(
     default_llm_provider="ollama",
-    ollama_model="qwen3:30b",
+    ollama_model="qwen3:30b-a3b",
     default_temperature=0.0,
 )
 pipeline = ClusteringPipeline(settings=settings)
 
 # Или через .env
 # DEFAULT_LLM_PROVIDER=ollama
-# OLLAMA_MODEL=qwen3:30b
+# OLLAMA_MODEL=qwen3:30b-a3b
 ```
 
 ### Создание собственного провайдера
@@ -498,7 +498,7 @@ settings = Settings(
     max_clusters_per_batch=5,
     default_temperature=0.1,
     default_llm_provider="ollama",
-    ollama_model="qwen3:30b",
+    ollama_model="qwen3:30b-a3b",
 )
 
 # Инициализация
