@@ -1,5 +1,7 @@
 # Quick Start
 
+> **Примечание**: Основная документация находится в [README.md](../README.md) в корне проекта.
+
 ## Установка
 
 ```bash
@@ -424,4 +426,97 @@ PYTHONPATH=src:$PYTHONPATH python ai_experiments/test_triton.py
 ```
 
 **Примечание**: Убедитесь, что Triton сервер запущен и модель загружена перед запуском теста.
+
+## Шпаргалка команд
+
+### Основные команды запуска
+
+```bash
+# Базовая кластеризация
+llm-clustering --input ai_data/demo_sample.csv --limit 20
+
+# С указанием batch-id
+llm-clustering --input ai_data/demo_sample.csv --limit 100 --batch-id test_100
+
+# С кастомным текстовым столбцом
+llm-clustering --input data.csv --text-column message --limit 50
+
+# Использование через Python модуль
+PYTHONPATH=src:$PYTHONPATH python -m llm_clustering.main --input ai_data/demo_sample.csv --limit 20
+```
+
+### Тестовые команды
+
+```bash
+# Тест библиотечного API
+PYTHONPATH=src:$PYTHONPATH python ai_experiments/test_library_api.py
+
+# Тест Ollama
+PYTHONPATH=src:$PYTHONPATH python ai_experiments/test_ollama_success.py
+
+# Тест OpenRouter
+PYTHONPATH=src:$PYTHONPATH python ai_experiments/test_openrouter_simple.py
+
+# Тест Triton
+PYTHONPATH=src:$PYTHONPATH python ai_experiments/test_triton.py
+
+# Тест параллельной обработки
+PYTHONPATH=src:$PYTHONPATH python ai_experiments/test_parallel_inference.py
+
+# Запуск unit-тестов
+PYTHONPATH=src:$PYTHONPATH pytest
+```
+
+### Подготовка данных
+
+```bash
+# Создать тестовый датасет из ~/data/subs
+PYTHONPATH=src:$PYTHONPATH python -m llm_clustering.data.subs_dataset --limit 1000
+
+# Распаковать демо-данные
+unzip ai_data/demo_sample.csv.zip -d ai_data/
+```
+
+### Работа с Docker (Triton)
+
+```bash
+# Запуск Triton сервера
+docker run -d --name triton-server --gpus all -p 8000:8000 -p 8001:8001 -p 8002:8002 \
+  -v $(pwd)/ai_data/triton_models:/models \
+  nvcr.io/nvidia/tritonserver:24.09-py3 \
+  tritonserver --model-repository=/models
+
+# Проверка статуса
+curl http://localhost:8000/v2/health/ready
+
+# Логи
+docker logs triton-server
+
+# Остановка
+docker stop triton-server && docker rm triton-server
+```
+
+### Переменные окружения
+
+```bash
+# Экспорт переменных из .env
+export $(cat .env | grep -v '^#' | grep -v '^$' | xargs)
+
+# Или с активированным venv
+source venv/bin/activate
+export $(cat .env | grep -v '^#' | grep -v '^$' | xargs)
+```
+
+### Make команды
+
+```bash
+# Запуск с demo данными
+INPUT=ai_data/demo_sample.csv make run
+
+# С ограничением
+INPUT=ai_data/demo_sample.csv LIMIT=100 make run
+
+# С кастомными параметрами
+INPUT=ai_data/support.csv BATCH=batch-20241121 TEXT_COL=message make run
+```
 

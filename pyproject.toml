@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "llm-clustering"
 version = "0.1.0"
 description = "LLM-based clustering for contact center customer inquiries"
-readme = "ai_doc/README.md"
+readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
