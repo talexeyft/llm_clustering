@@ -34,6 +34,12 @@ def parse_args() -> argparse.Namespace:
         default="text",
         help="Column that stores the request text (default: text).",
     )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Limit the number of input messages to process. If omitted, processes all messages.",
+    )
     return parser.parse_args()
 
 
@@ -60,6 +66,12 @@ def main() -> None:
 
     input_path = Path(args.input)
     dataframe = load_dataframe(input_path, args.format)
+    
+    # Apply limit if specified
+    if args.limit is not None and args.limit > 0:
+        original_count = len(dataframe)
+        dataframe = dataframe.head(args.limit)
+        print(f"[LLM Clustering] Limited input from {original_count} to {len(dataframe)} messages")
 
     runner = PipelineRunner(text_column=args.text_column)
     result = runner.run(dataframe, batch_id=args.batch_id)

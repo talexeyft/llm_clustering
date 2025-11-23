@@ -4,12 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import TYPE_CHECKING, Sequence
 
 import pandas as pd
+from tqdm import tqdm
 
-from llm_clustering.clustering.judge import AssignmentJudge, AssignmentResult
-from llm_clustering.clustering.proposer import ClusterProposer, ProposerResult
 from llm_clustering.clustering.registry import ClusterRecord, ClusterRegistry
 from llm_clustering.config import Settings, get_settings
 from llm_clustering.monitoring import CohesionChecker
@@ -20,6 +19,10 @@ from llm_clustering.pipeline.batch_builder import (
     SnapshotPaths,
 )
 from llm_clustering.utils.metrics import MetricsTracker
+
+if TYPE_CHECKING:
+    from llm_clustering.clustering.judge import AssignmentJudge, AssignmentResult
+    from llm_clustering.clustering.proposer import ClusterProposer, ProposerResult
 
 
 @dataclass(slots=True)
@@ -61,12 +64,29 @@ class PipelineRunner:
         settings: Settings | None = None,
         registry: ClusterRegistry | None = None,
         text_column: str = "text",
+        llm_provider: BaseLLMProvider | None = None,
+        business_context: str | None = None,
     ) -> None:
+        # Late import to avoid circular dependency
+        from llm_clustering.clustering.judge import AssignmentJudge
+        from llm_clustering.clustering.proposer import ClusterProposer
+        from llm_clustering.llm.base import BaseLLMProvider
+        
         self.settings = settings or get_settings()
         self.registry = registry or ClusterRegistry(settings=self.settings)
         self.builder = BatchBuilder(settings=self.settings, text_column=text_column)
-        self.proposer = ClusterProposer(registry=self.registry, settings=self.settings)
-        self.judge = AssignmentJudge(registry=self.registry, settings=self.settings)
+        self.proposer = ClusterProposer(
+            registry=self.registry,
+            settings=self.settings,
+            llm=llm_provider,
+            business_context=business_context,
+        )
+        self.judge = AssignmentJudge(
+            registry=self.registry,
+            settings=self.settings,
+            llm=llm_provider,
+            business_context=business_context,
+        )
         self.metrics_tracker = MetricsTracker(settings=self.settings)
         self.cohesion_checker = CohesionChecker(settings=self.settings)
         self.results_dir = Path(self.settings.results_dir)
@@ -78,22 +98,34 @@ class PipelineRunner:
         slice_outcomes: list[SliceOutcome] = []
         assignment_rows: list[AssignmentResult] = []
 
-        for batch_slice in build_result.slices:
-            proposer_result = self.proposer.propose(batch_slice)
-            candidate_clusters = self._candidate_clusters(proposer_result.clusters)
-            assignments = self.judge.judge_slice(
-                batch_slice,
-                candidate_clusters=candidate_clusters,
-            )
-
-            slice_outcomes.append(
-                SliceOutcome(
-                    slice=batch_slice,
-                    proposer=proposer_result,
-                    assignments=assignments,
+        total_slices = len(build_result.slices)
+        processed_requests = 0
+        total_requests = len(dataframe)
+        
+        with tqdm(total=total_slices, desc="Processing batches", unit="batch") as pbar:
+            for batch_slice in build_result.slices:
+                proposer_result = self.proposer.propose(batch_slice)
+                candidate_clusters = self._candidate_clusters(proposer_result.clusters)
+                assignments = self.judge.judge_slice(
+                    batch_slice,
+                    candidate_clusters=candidate_clusters,
                 )
-            )
-            assignment_rows.extend(assignments)
+
+                slice_outcomes.append(
+                    SliceOutcome(
+                        slice=batch_slice,
+                        proposer=proposer_result,
+                        assignments=assignments,
+                    )
+                )
+                assignment_rows.extend(assignments)
+                
+                processed_requests += batch_slice.size
+                pbar.set_postfix({
+                    'requests': f'{processed_requests}/{total_requests}',
+                    'coverage': f'{len([a for a in assignment_rows if a.cluster_id])}/{processed_requests}'
+                })
+                pbar.update(1)
 
         assignments_df = self._to_dataframe(assignment_rows)
         assignments_path = self._persist_assignments(

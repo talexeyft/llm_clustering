@@ -30,6 +30,11 @@ class BatchConfig(BaseModel):
         ge=1,
         description="Size of the buffer that stores requests without a cluster.",
     )
+    parallel_inference_batch_size: int = Field(
+        5,
+        ge=1,
+        description="Number of parallel inference requests to GPU (default: 5).",
+    )
 
 
 class LLMConfig(BaseModel):
@@ -119,6 +124,7 @@ class Settings(BaseSettings):
     max_clusters_per_batch: int = 8
     min_requests_per_cluster: int = 3
     rare_case_buffer_size: int = 20
+    parallel_inference_batch_size: int = 5
     clustering_similarity_threshold: float = 0.8
 
     # Storage
@@ -149,6 +155,7 @@ class Settings(BaseSettings):
             max_clusters_per_batch=self.max_clusters_per_batch,
             min_requests_per_cluster=self.min_requests_per_cluster,
             rare_case_buffer_size=self.rare_case_buffer_size,
+            parallel_inference_batch_size=self.parallel_inference_batch_size,
         )
 
     @property

@@ -6,6 +6,13 @@
 python3.12 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+
+# Или установить как библиотеку в editable mode
+pip install -e .
+
+# Проверить установку
+python -c "import llm_clustering; print(llm_clustering.__version__)"
+llm-clustering --help
 ```
 
 ## Настройка
@@ -44,18 +51,26 @@ cp env.example .env
 ### Тестовый датасет из ~/data/subs
 
 ```bash
-# Собрать первые 1000 сообщений в parquet/csv
+# Собрать первые 1000 сообщений в единый parquet/csv файл
 PYTHONPATH=src:$PYTHONPATH python -m llm_clustering.data.subs_dataset --limit 1000
 ```
 
-После выполнения появятся файлы `ai_data/subs_sample_1000.parquet` и `.csv`.
-Их можно использовать в качестве стандартного входа для пайплайна.
+После выполнения появятся файлы `ai_data/subs_sample.parquet` и `.csv` (единый файл для всех тестов).
+Используйте параметр `--limit` при запуске для ограничения количества обращений.
+
+**Примечание:** Старые файлы с суффиксами размера (`subs_sample_20.parquet`, `subs_sample_100.parquet` и т.д.) больше не создаются. Если они есть в `ai_data/`, можно их удалить:
+```bash
+rm -f ai_data/subs_sample_*.parquet ai_data/subs_sample_*.csv
+```
 
 ## Запуск MVP пайплайна
 
 ```bash
-# пример: parquet c тестовыми обращениями subs
-INPUT=ai_data/subs_sample_1000.parquet make run
+# пример: parquet c тестовыми обращениями subs (все сообщения из файла)
+INPUT=ai_data/subs_sample.parquet make run
+
+# ограничить количество обращений через --limit
+PYTHONPATH=src:$PYTHONPATH python -m llm_clustering.main --input ai_data/subs_sample.parquet --limit 100
 
 # указать batch_id и альтернативное имя текстового столбца
 INPUT=ai_data/support.csv BATCH=batch-20241121 TEXT_COL=message make run
@@ -166,22 +181,165 @@ docker run -d --name triton-server --gpus all -p 8000:8000 -p 8001:8001 -p 8002:
 
 После запуска модель автоматически загрузится (может занять несколько минут при первом запуске).
 
-## Базовое использование
+## Использование как библиотека
+
+### Установка в любое ядро/окружение
+
+```bash
+# Установка в editable mode для разработки
+pip install -e /path/to/llm_clustering
+
+# Или установка как обычный пакет
+pip install /path/to/llm_clustering
+
+# Проверка установки
+python -c "import llm_clustering; print(llm_clustering.__version__)"
+```
+
+### Базовое использование
 
 ```python
-from llm_clustering.clustering import Clusterer
+from llm_clustering import ClusteringPipeline
 import pandas as pd
 
-# Загрузка данных
-inquiries = pd.read_csv("data/inquiries.csv")
+# Создать pipeline с настройками по умолчанию
+pipeline = ClusteringPipeline()
 
-# Кластеризация
-clusterer = Clusterer()
-clustered = clusterer.cluster_inquiries(inquiries, text_column="text")
+# Загрузить данные
+df = pd.DataFrame({
+    "text": ["Не могу войти", "Забыл пароль", "Товар не пришел"]
+})
 
-# Описание кластеров
-descriptions = clusterer.describe_clusters(clustered)
+# Выполнить кластеризацию
+result = pipeline.fit(df, text_column="text")
+
+# Результаты
+print(f"Coverage: {result.coverage:.1f}%")
+print(f"Clusters found: {len(result.clusters)}")
+print(result.assignments.head())
 ```
+
+### Использование с кастомной LLM
+
+```python
+from llm_clustering import ClusteringPipeline, BaseLLMProvider
+
+class MyCustomLLM(BaseLLMProvider):
+    def chat_completion(self, messages, temperature=None, max_tokens=None):
+        # Ваша реализация вызова LLM
+        return "JSON response from your LLM"
+    
+    # Остальные методы можно не реализовывать, если не нужны
+    def embed(self, texts): raise NotImplementedError()
+    def cluster(self, texts, num_clusters=None): raise NotImplementedError()
+    def describe_cluster(self, texts): raise NotImplementedError()
+
+# Использование кастомной LLM
+custom_llm = MyCustomLLM()
+pipeline = ClusteringPipeline(llm_provider=custom_llm)
+result = pipeline.fit(df, text_column="text")
+```
+
+### Итеративная обработка
+
+```python
+# Обработка большого датасета по частям
+for partial in pipeline.fit_partial(df, batch_size=50, start_from=0):
+    print(f"Batch {partial.batch_number}: {partial.processed_rows}/{partial.total_rows}")
+    print(f"New clusters: {len(partial.new_clusters)}")
+    
+    # Можно остановиться в любой момент
+    if partial.processed_rows >= 200:
+        break
+```
+
+### Доразметка данных
+
+```python
+# Первоначальная разметка
+result1 = pipeline.fit(df_part1, text_column="text")
+
+# Позже: доразметка с учетом найденных кластеров
+result2 = pipeline.refit(
+    df_part2,
+    previous_assignments=result1.assignments,
+    text_column="text"
+)
+
+# Кластеры обновлены и уточнены
+all_clusters = pipeline.get_clusters()
+```
+
+### Сохранение и загрузка кластеров
+
+```python
+from pathlib import Path
+
+# Сохранить кластеры
+pipeline.save_clusters(Path("my_clusters.json"))
+
+# Загрузить в новый pipeline
+new_pipeline = ClusteringPipeline()
+new_pipeline.load_clusters(Path("my_clusters.json"))
+
+# Использовать загруженные кластеры
+result = new_pipeline.fit(new_df, text_column="text")
+```
+
+### Использование бизнес-контекста
+
+```python
+# Добавление контекста для специфичной кластеризации
+business_context = """
+Разметка обращений для улучшения бота поддержки.
+Разделяй проблемы по сложности доработки:
+- Простые: FAQ, типовые вопросы (автоматизируемые)
+- Средние: требуют проверки данных
+- Сложные: нестандартные ситуации
+"""
+
+pipeline = ClusteringPipeline(business_context=business_context)
+result = pipeline.fit(df, text_column="text")
+
+# LLM будет учитывать бизнес-контекст при кластеризации
+```
+
+### Полный пример с настройками
+
+```python
+from llm_clustering import ClusteringPipeline, Settings
+from pathlib import Path
+
+# Кастомные настройки
+settings = Settings(
+    clustering_batch_size=30,
+    max_clusters_per_batch=5,
+    default_temperature=0.1,
+    default_llm_provider="ollama",
+    ollama_model="qwen3:30b",
+)
+
+# Инициализация с настройками
+pipeline = ClusteringPipeline(
+    settings=settings,
+    business_context="Разметка для бота поддержки",
+    registry_path=Path("ai_data/my_clusters.json")
+)
+
+# Обработка
+result = pipeline.fit(df, text_column="text", limit=100)
+
+# Работа с результатами
+for cluster in result.clusters:
+    print(f"{cluster.name}: {cluster.count} requests")
+    print(f"  Summary: {cluster.summary}")
+
+# Сохранение результатов
+result.assignments.to_csv("results.csv", index=False)
+pipeline.save_clusters(Path("final_clusters.json"))
+```
+
+Больше примеров смотрите в `examples.py`.
 
 ## Запуск тестов
 
@@ -199,19 +357,15 @@ ollama serve
 source venv/bin/activate
 export $(cat .env | grep -v '^#' | grep -v '^$' | xargs)
 PYTHONPATH=src:$PYTHONPATH python -m llm_clustering.main \
-  --input ai_data/subs_sample_20.parquet \
+  --input ai_data/subs_sample.parquet \
+  --limit 20 \
   --batch-id test_quick
 
 # Запуск на 100 записях (батчи по 20)
 PYTHONPATH=src:$PYTHONPATH python -m llm_clustering.main \
-  --input ai_data/subs_sample_100.parquet \
+  --input ai_data/subs_sample.parquet \
+  --limit 100 \
   --batch-id test_100
-
-# Результаты на 100 записях:
-# - Coverage: 74% (74 из 100 назначено)
-# - Время: ~8.5 минут
-# - Основной кластер: dropped_calls_network_issues (50 запросов)
-# - Детали: ai_data/ИТОГОВАЯ_СВОДКА_100_ЗАПРОСОВ.md
 ```
 
 **Рекомендуемые модели для Ollama:**
@@ -229,27 +383,6 @@ PYTHONPATH=src:$PYTHONPATH python ai_experiments/test_ollama_success.py
 ```
 
 **Примечание**: Провайдер Ollama использует `urllib3` вместо `requests` из-за проблем совместимости с Ollama сервером.
-
-## Просмотр результатов
-
-После запуска можно посмотреть результаты:
-
-```bash
-# Результаты кластеризации (CSV)
-cat ai_data/results/test_100_detailed.csv | head -20
-
-# Cohesion отчет
-cat ai_data/reports/test_100_detailed_cohesion.txt
-
-# Метрики
-tail -10 ai_data/metrics.csv
-
-# Реестр кластеров (JSON)
-cat ai_data/cluster_registry.json | jq '.clusters[] | {cluster_id, name, count}'
-
-# Детальный анализ (если есть)
-cat ai_data/ИТОГОВАЯ_СВОДКА_100_ЗАПРОСОВ.md
-```
 
 ## Тестирование OpenRouter
 

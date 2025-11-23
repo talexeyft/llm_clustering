@@ -97,15 +97,18 @@ class BatchBuilder:
             msg = "BatchBuilder expects a pandas.DataFrame."
             raise TypeError(msg)
 
-        required_columns = {"request_id", self.text_column}
-        missing = required_columns.difference(set(dataframe.columns))
-        if missing:
-            msg = f"DataFrame is missing required columns: {', '.join(sorted(missing))}"
+        # Check for text column
+        if self.text_column not in dataframe.columns:
+            msg = f"DataFrame is missing required text column: {self.text_column}"
             raise ValueError(msg)
 
         working_df = dataframe.copy()
         resolved_batch_id = batch_id or self._generate_batch_id()
 
+        # Auto-generate request_id if not present
+        if "request_id" not in working_df.columns:
+            working_df["request_id"] = [f"req-{resolved_batch_id}-{i}" for i in range(len(working_df))]
+        
         working_df["batch_id"] = resolved_batch_id
         working_df["request_id"] = working_df["request_id"].astype(str)
         working_df["text_raw"] = working_df[self.text_column].fillna("").astype(str)

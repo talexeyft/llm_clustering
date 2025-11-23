@@ -17,6 +17,8 @@ ASSIGNMENT_JUDGE_TEMPLATE = PromptTemplate(
         provided clusters. Answer conservatively, use Russian, and never assign
         when confidence is low.
         
+        $business_context_section
+        
         CRITICAL: Do NOT use <think> tags or any reasoning markup. 
         Reply ONLY with valid JSON, no text before or after.
         """
@@ -61,13 +63,24 @@ def render_assignment_judge_prompt(
     batch_id: str,
     request: dict[str, str],
     candidate_clusters: Sequence[dict[str, str]],
+    business_context: str | None = None,
 ) -> RenderedPrompt:
     """Render judge prompt for a single request."""
+    business_context_section = ""
+    if business_context:
+        business_context_section = dedent(
+            f"""
+            ## Business Context
+            {business_context.strip()}
+            """
+        ).strip()
+    
     context = {
         "batch_id": batch_id,
         "request_id": request.get("request_id", "unknown"),
         "request_text": request.get("text_clean") or request.get("text") or "",
         "candidate_clusters": _format_candidate_clusters(candidate_clusters),
+        "business_context_section": business_context_section,
     }
     return ASSIGNMENT_JUDGE_TEMPLATE.render(context)
 

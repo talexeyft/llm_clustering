@@ -17,6 +17,8 @@ CLUSTER_PROPOSER_TEMPLATE = PromptTemplate(
         only the given data. You think in Russian, produce concise reasoning,
         and NEVER invent additional facts. Respect the batch boundaries.
         
+        $business_context_section
+        
         CRITICAL: Do NOT use <think> tags or any reasoning markup. 
         Reply ONLY with valid JSON, no text before or after.
         """
@@ -69,13 +71,24 @@ def render_cluster_proposer_prompt(
     requests: Sequence[dict[str, str]],
     known_clusters: Sequence[dict[str, str]] | None,
     max_clusters: int,
+    business_context: str | None = None,
 ) -> RenderedPrompt:
     """Render the proposer prompt with contextual data."""
+    business_context_section = ""
+    if business_context:
+        business_context_section = dedent(
+            f"""
+            ## Business Context
+            {business_context.strip()}
+            """
+        ).strip()
+    
     context = {
         "batch_id": batch_id,
         "max_clusters": max_clusters,
         "known_clusters": _format_known_clusters(known_clusters or []),
         "requests_block": _format_requests(requests),
+        "business_context_section": business_context_section,
     }
     return CLUSTER_PROPOSER_TEMPLATE.render(context)
 

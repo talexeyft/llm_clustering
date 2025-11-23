@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any, Iterable, Literal, Sequence, cast
 
@@ -20,7 +21,7 @@ from llm_clustering.llm.prompts import (
     RenderedPrompt,
     render_assignment_judge_prompt,
 )
-from llm_clustering.pipeline import BatchSlice
+from llm_clustering.pipeline.batch_builder import BatchSlice
 
 DecisionLiteral = Literal["assign", "new_cluster", "skip"]
 
@@ -50,73 +51,134 @@ class AssignmentJudge:
         registry: ClusterRegistry | None = None,
         llm: BaseLLMProvider | None = None,
         settings: Settings | None = None,
+        business_context: str | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         self.registry = registry or ClusterRegistry(settings=self.settings)
         self.llm = llm or get_llm_provider()
         self.prompt_logger = PromptLogger(self.settings)
+        self.business_context = business_context
 
     def judge_slice(
         self,
         batch_slice: BatchSlice,
         candidate_clusters: Sequence[ClusterRecord] | None = None,
+        parallel_batch_size: int | None = None,
     ) -> list[AssignmentResult]:
-        """Evaluate every row inside the slice."""
+        """Evaluate every row inside the slice with parallel processing.
+        
+        Args:
+            batch_slice: Batch slice to process
+            candidate_clusters: Candidate clusters for assignment
+            parallel_batch_size: Number of parallel requests to process 
+                                (defaults to value from config)
+        """
         dataframe = batch_slice.dataframe
         if candidate_clusters is None:
             candidate_clusters = self.registry.list_clusters(limit=20)
 
+        # Use config value if not explicitly provided
+        if parallel_batch_size is None:
+            parallel_batch_size = self.settings.batch_config.parallel_inference_batch_size
+
         cluster_payload = self._format_clusters(candidate_clusters)
+        records = dataframe.to_dict(orient="records")
         results: list[AssignmentResult] = []
 
-        for record in dataframe.to_dict(orient="records"):
-            prompt = self._build_prompt(batch_slice.batch_id, cluster_payload, record)
-            response_text, latency = self._execute_prompt(prompt)
-            latency_ms = latency * 1000
-
-            try:
-                from llm_clustering.clustering.utils import extract_json_from_response
-                response_payload = extract_json_from_response(response_text)
-                if not isinstance(response_payload, dict):
-                    raise ValueError("Judge response must be a JSON object.")
-            except json.JSONDecodeError as err:
-                logger.error("Judge returned invalid JSON for %s: %s", record.get("request_id"), err)
-                logger.error("Original response: %s", response_text[:500])
-                results.append(
-                    AssignmentResult(
-                        batch_id=batch_slice.batch_id,
-                        slice_id=batch_slice.slice_id,
-                        request_id=str(record.get("request_id")),
-                        decision="skip",
-                        cluster_id=None,
-                        confidence_text="low (invalid JSON)",
-                        llm_rationale="Ответ модели нельзя разобрать.",
-                        raw_response={},
-                        latency_ms=round(latency_ms, 2),
-                        token_estimate=0,
+        # Process records in parallel batches
+        logger.info(f"Processing {len(records)} records with parallel batch size {parallel_batch_size}")
+        
+        with ThreadPoolExecutor(max_workers=parallel_batch_size) as executor:
+            # Submit all tasks
+            future_to_record = {
+                executor.submit(
+                    self._process_single_record,
+                    batch_slice,
+                    cluster_payload,
+                    record,
+                    candidate_clusters,
+                ): record
+                for record in records
+            }
+            
+            # Collect results as they complete
+            for future in as_completed(future_to_record):
+                record = future_to_record[future]
+                try:
+                    result = future.result()
+                    results.append(result)
+                except Exception as e:
+                    logger.error(f"Error processing record {record.get('request_id')}: {e}")
+                    # Create error result
+                    results.append(
+                        AssignmentResult(
+                            batch_id=batch_slice.batch_id,
+                            slice_id=batch_slice.slice_id,
+                            request_id=str(record.get("request_id")),
+                            decision="skip",
+                            cluster_id=None,
+                            confidence_text="low (error)",
+                            llm_rationale=f"Ошибка обработки: {str(e)}",
+                            raw_response={},
+                            latency_ms=0.0,
+                            token_estimate=0,
+                        )
                     )
-                )
-                continue
 
-            result = self._build_result(
-                batch_slice=batch_slice,
-                request_record=record,
-                response=response_payload,
-                cluster_context=candidate_clusters,
-                latency_ms=latency_ms,
-                token_estimate=self._estimate_tokens(prompt, response_text),
-            )
-            results.append(result)
-
-            self._log_prompt(
-                batch_slice=batch_slice,
-                request_id=result.request_id,
-                prompt=prompt,
-                response=response_payload,
-                latency_ms=latency_ms,
-            )
-
+        logger.info(f"Completed processing {len(results)} records")
         return results
+    
+    def _process_single_record(
+        self,
+        batch_slice: BatchSlice,
+        cluster_payload: list[dict[str, Any]],
+        record: dict[str, Any],
+        candidate_clusters: Sequence[ClusterRecord],
+    ) -> AssignmentResult:
+        """Process a single record (used for parallel execution)."""
+        prompt = self._build_prompt(batch_slice.batch_id, cluster_payload, record)
+        response_text, latency = self._execute_prompt(prompt)
+        latency_ms = latency * 1000
+
+        try:
+            from llm_clustering.clustering.utils import extract_json_from_response
+            response_payload = extract_json_from_response(response_text)
+            if not isinstance(response_payload, dict):
+                raise ValueError("Judge response must be a JSON object.")
+        except json.JSONDecodeError as err:
+            logger.error("Judge returned invalid JSON for %s: %s", record.get("request_id"), err)
+            logger.error("Original response: %s", response_text[:500])
+            return AssignmentResult(
+                batch_id=batch_slice.batch_id,
+                slice_id=batch_slice.slice_id,
+                request_id=str(record.get("request_id")),
+                decision="skip",
+                cluster_id=None,
+                confidence_text="low (invalid JSON)",
+                llm_rationale="Ответ модели нельзя разобрать.",
+                raw_response={},
+                latency_ms=round(latency_ms, 2),
+                token_estimate=0,
+            )
+
+        result = self._build_result(
+            batch_slice=batch_slice,
+            request_record=record,
+            response=response_payload,
+            cluster_context=candidate_clusters,
+            latency_ms=latency_ms,
+            token_estimate=self._estimate_tokens(prompt, response_text),
+        )
+
+        self._log_prompt(
+            batch_slice=batch_slice,
+            request_id=result.request_id,
+            prompt=prompt,
+            response=response_payload,
+            latency_ms=latency_ms,
+        )
+
+        return result
 
     def _build_prompt(
         self,
@@ -128,6 +190,7 @@ class AssignmentJudge:
             batch_id=batch_id,
             request=request_record,
             candidate_clusters=candidate_clusters,
+            business_context=self.business_context,
         )
 
     def _execute_prompt(self, prompt: RenderedPrompt) -> tuple[str, float]:

@@ -111,14 +111,19 @@ def materialize_subs_sample(
     output_dir: Path | str = DEFAULT_OUTPUT_DIR,
     file_stem: str = DEFAULT_FILE_STEM,
 ) -> SubsSampleResult:
-    """Persist a deterministic sample to ai_data as parquet and csv."""
+    """Persist a deterministic sample to ai_data as parquet and csv.
+    
+    Creates a unified file that can be reused with different limits.
+    The file will contain up to `sample_size` messages, but the filename
+    will not include the size, allowing reuse with --limit parameter.
+    """
 
     dataframe = load_subs_messages(sample_size=sample_size, subs_dir=subs_dir)
     target_dir = Path(output_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    parquet_path = target_dir / f"{file_stem}_{sample_size}.parquet"
-    csv_path = target_dir / f"{file_stem}_{sample_size}.csv"
+    parquet_path = target_dir / f"{file_stem}.parquet"
+    csv_path = target_dir / f"{file_stem}.csv"
 
     dataframe.to_parquet(parquet_path, index=False)
     dataframe.to_csv(csv_path, index=False)

@@ -21,7 +21,7 @@ from llm_clustering.llm.prompts import (
     RenderedPrompt,
     render_cluster_proposer_prompt,
 )
-from llm_clustering.pipeline import BatchSlice
+from llm_clustering.pipeline.batch_builder import BatchSlice
 
 
 @dataclass(slots=True)
@@ -49,12 +49,14 @@ class ClusterProposer:
         registry: ClusterRegistry | None = None,
         llm: BaseLLMProvider | None = None,
         settings: Settings | None = None,
+        business_context: str | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         self.registry = registry or ClusterRegistry(settings=self.settings)
         self.llm = llm or get_llm_provider()
         self.prompt_logger = PromptLogger(self.settings)
         self.batch_config = self.settings.batch_config
+        self.business_context = business_context
 
     def propose(
         self,
@@ -108,6 +110,7 @@ class ClusterProposer:
             requests=requests_payload,
             known_clusters=known_clusters,
             max_clusters=max_clusters,
+            business_context=self.business_context,
         )
 
     def _execute_prompt(self, prompt: RenderedPrompt) -> tuple[str, float]:
