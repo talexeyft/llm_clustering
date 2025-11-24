@@ -62,13 +62,14 @@ class ClusterProposer(BaseLLMComponent):
         token_estimate = self._estimate_tokens(prompt, response_text)
         
         # Parse and validate response using Pydantic
-        json_data = self._parse_json_response(response_text, "proposer")
         try:
+            json_data = self._parse_json_response(response_text, "proposer")
             response = ProposerResponse.model_validate(json_data)
-        except Exception as err:
-            logger.error("Failed to validate proposer response: %s", err)
+        except (ValueError, Exception) as err:
+            logger.error("Failed to parse or validate proposer response: %s", err)
             # Fallback to empty response
             response = ProposerResponse(batch_id=batch_slice.batch_id, clusters=[], skipped_request_ids=[])
+            json_data = {} # Ensure json_data is defined for logging
 
         # Persist clusters from validated response
         clusters = self._persist_clusters(response.clusters, batch_slice=batch_slice)
