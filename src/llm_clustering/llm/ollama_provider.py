@@ -162,6 +162,7 @@ class OllamaProvider(BaseLLMProvider):
             "model": self.model,
             "messages": messages,
             "stream": False,
+            "format": "json",
             "options": {
                 "temperature": temperature or self.temperature,
                 "num_predict": max_tokens or self.max_tokens,
