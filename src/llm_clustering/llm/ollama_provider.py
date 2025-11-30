@@ -57,7 +57,7 @@ class OllamaProvider(BaseLLMProvider):
             http = urllib3.PoolManager(
                 num_pools=1,
                 maxsize=1,
-                timeout=urllib3.Timeout(connect=10, read=120)
+                timeout=urllib3.Timeout(connect=10, read=600)
             )
             
             response = http.request(
